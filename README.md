@@ -16,7 +16,7 @@ The goal is to design, build, and demonstrate these systems as a team.
 *   Lim Lee
 *   Shoumil Ghosh
 *   Hansen
-*   ShengWai
+*   Sheng Wai
 
 ## Timeline
 
@@ -71,6 +71,12 @@ The goal is to design, build, and demonstrate these systems as a team.
 | | | |
 | | | |
 | | | |
+
+---
+## Project Reports
+
+* **Assignment 1:** [Classical Face Recognition](https://docs.google.com/document/d/1pAHRi5T8x3vzF0LDrKsh2vkstVJq6eFwR6ybT8cGLAM/edit?tab=t.0)
+* **Assignment 2:** [Deep Learning Face Recognition](https://docs.google.com/document/d/1HorwvEYqTqnv6BVjjez8JVHCd1MuwLd28RgZHf5cgx4/edit?tab=t.0)
 
 ---
 
