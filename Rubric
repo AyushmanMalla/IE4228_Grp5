@@ -1,0 +1,114 @@
+# IE4228 Assignment 2 — Grading Rubric
+
+> **Deep Learning-based Human Face Detection and Recognition System**
+>
+> Total: **100 points** &nbsp;|&nbsp; Live Demo: Week 12/13 &nbsp;|&nbsp; Report deadline: before lab assessment week
+
+---
+
+## Scoring Guide
+
+| Grade | Range | Description |
+|-------|-------|-------------|
+| A+ / A | 85–100 | Exceeds expectations; state-of-the-art choices, rigorous evaluation |
+| A− / B+ | 75–84 | Meets all requirements with solid technical depth |
+| B / B− | 60–74 | Meets core requirements with minor gaps |
+| C+ / C | 50–59 | Minimal viable submission; significant gaps |
+| D / F | 0–49 | Incomplete or non-functional |
+
+---
+
+## 1. Face Detection Pipeline — 15 pts
+
+| Criterion | Excellent (13–15) | Good (10–12) | Adequate (7–9) | Poor (0–6) |
+|-----------|-------------------|--------------|-----------------|------------|
+| **Model selection & justification** | Uses a modern detector (RetinaFace, SCRFD, YOLOv8-face) with clear justification referencing benchmarks (e.g. WIDER FACE AP). Compares ≥2 detectors. | Uses an appropriate detector (e.g. MTCNN or RetinaFace) with brief justification. | Uses a single off-the-shelf detector with no comparative analysis. | No deep-learning detector; or detector does not produce bounding boxes. |
+| **Bounding box accuracy** | Tight bounding boxes on all team members under varying lighting and distance; handles partial occlusion. | Bounding boxes present and mostly accurate; occasional misses on profile/occluded faces. | Bounding boxes present but noticeably inaccurate or miss small faces. | Bounding boxes missing or consistently wrong. |
+| **Real-time capability** | ≥ 20 FPS on demo hardware; latency metrics reported. | 10–19 FPS; minor perceptible lag. | 5–9 FPS; noticeable lag but still usable. | < 5 FPS or not real-time. |
+
+---
+
+## 2. Face Recognition & Embedding Quality — 20 pts
+
+| Criterion | Excellent (17–20) | Good (13–16) | Adequate (9–12) | Poor (0–8) |
+|-----------|-------------------|--------------|-----------------|------------|
+| **Model depth & understanding** | Uses a strong backbone (ResNet-100, ViT, or FaceLiVT) trained with angular margin loss (ArcFace / AdaFace). Demonstrates understanding of embedding space geometry. | Uses FaceNet or a pre-trained InsightFace model; explains embedding concept. | Uses a pre-trained model as a black box; minimal explanation. | No recognition model or classifier-only approach with no embeddings. |
+| **Open-set "Unknown" handling** | Implements a calibrated similarity threshold with justification; demonstrates low false-positive rate for unseen faces. | Has a threshold-based unknown signal; tested with ≥2 unknown subjects. | "Unknown" label exists but threshold is arbitrary or untested. | No unknown detection. |
+| **Fine-tuning / advanced work** *(bonus-eligible)* | Fine-tunes on collected data or trains a custom model on VGGFace2/WebFace; reports before/after metrics. | Attempts fine-tuning with partial results. | Uses only pre-trained weights. | N/A (no penalty, but no bonus). |
+
+---
+
+## 3. Database & Data Engineering — 10 pts
+
+| Criterion | Excellent (9–10) | Good (7–8) | Adequate (5–6) | Poor (0–4) |
+|-----------|------------------|------------|-----------------|------------|
+| **Gallery completeness** | ≥ 10 images per person for **all** team members + ≥ 2 additional individuals; varied poses, lighting, and expressions. | ≥ 10 images per person for all team members; limited variation. | < 10 images for some members; minimal diversity. | Gallery incomplete or poorly organized. |
+| **Pre-processing pipeline** | Face alignment (5-point or 3D-based), normalization, and augmentation documented; pipeline is scripted and reproducible. | Alignment and resize applied; partially scripted. | Manual or ad-hoc cropping only. | No pre-processing. |
+
+---
+
+## 4. Live Demonstration & GUI — 20 pts
+
+| Criterion | Excellent (17–20) | Good (13–16) | Adequate (9–12) | Poor (0–8) |
+|-----------|-------------------|--------------|-----------------|------------|
+| **Functional demo** | All team members detected and correctly recognized in real-time; unknown faces correctly rejected; smooth, uninterrupted operation. | Most members recognized; ≤ 1 incorrect identification during demo; minor hiccups. | ≥ 50% recognition rate; some crashes or freezes. | Demo non-functional or requires restart. |
+| **GUI quality** | Clean, labeled bounding boxes with name overlay; FPS counter; confidence score display; professional layout. | Bounding boxes with name labels; basic but functional UI. | Minimal UI; raw OpenCV window with text. | No GUI or command-line only. |
+| **Robustness** | Handles multiple simultaneous faces, varying distances, and lighting changes gracefully. | Handles 2–3 faces; some sensitivity to conditions. | Single-face only or very fragile. | Fails under any variation. |
+
+---
+
+## 5. Technical Report — 15 pts
+
+| Criterion | Excellent (13–15) | Good (10–12) | Adequate (7–9) | Poor (0–6) |
+|-----------|-------------------|--------------|-----------------|------------|
+| **Architecture description** | Clear pipeline diagram; explains each stage (detection → alignment → embedding → matching); cites relevant papers. | Describes the pipeline with some detail; references present. | High-level description only; few or no references. | No architecture description. |
+| **Performance analysis** | Reports quantitative metrics (accuracy, FPS, ROC/DET curves, threshold analysis); compares with baselines. | Reports accuracy and FPS; limited analysis. | Reports only pass/fail observations. | No metrics. |
+| **Individual contributions** | Clearly delineated per-member contributions; signed by all members. | Contributions listed but vaguely described. | Contributions section present but incomplete. | Missing contributions or signatures. |
+| **Writing quality** | Well-structured, professional, free of major errors. | Readable with minor issues. | Disorganized or hard to follow. | Incomprehensible or largely copy-pasted. |
+
+---
+
+## 6. Individual Video Submission — 10 pts
+
+| Criterion | Excellent (9–10) | Good (7–8) | Adequate (5–6) | Poor (0–4) |
+|-----------|------------------|------------|-----------------|------------|
+| **Content & clarity** | 3–5 min; clearly explains personal contribution, technical decisions, and demonstrates understanding of the full pipeline. | Covers contribution and shows understanding; minor gaps. | Within time limit but shallow or unfocused. | Missing, too short/long, or does not demonstrate understanding. |
+
+---
+
+## 7. Code Quality & Testability — 10 pts
+
+> Inspired by **Test-Driven Development** principles: every behavior should be provable by a test; code should be structured so that components are independently verifiable.
+
+| Criterion | Excellent (9–10) | Good (7–8) | Adequate (5–6) | Poor (0–4) |
+|-----------|------------------|------------|-----------------|------------|
+| **Modularity** | Code is organized into clear, independently testable modules (e.g. `detector.py`, `recognizer.py`, `database.py`, `gui.py`). Functions have single responsibilities. | Reasonable separation but some monolithic sections. | Everything in one or two files; hard to isolate components. | Spaghetti code with no structure. |
+| **Automated tests** | Unit tests exist for key functions (embedding generation, similarity scoring, threshold logic, database CRUD). Tests are runnable via a single command (e.g. `pytest`). | Some tests present but incomplete coverage. | No automated tests; only manual verification described. | No tests of any kind. |
+| **Reproducibility** | `requirements.txt` or Conda `environment.yml` provided; clear README with setup and run instructions; seeds set for deterministic behavior where applicable. | Dependency list provided; basic instructions. | Dependencies listed informally (e.g. in comments). | No dependency info; cannot reproduce setup. |
+
+---
+
+## Point Allocation Summary
+
+| Category | Points |
+|----------|--------|
+| 1. Face Detection Pipeline | 15 |
+| 2. Face Recognition & Embeddings | 20 |
+| 3. Database & Data Engineering | 10 |
+| 4. Live Demonstration & GUI | 20 |
+| 5. Technical Report | 15 |
+| 6. Individual Video | 10 |
+| 7. Code Quality & Testability | 10 |
+| **Total** | **100** |
+
+---
+
+> [!TIP]
+> **Bonus opportunities (up to +5 extra credit):**
+> - Fine-tuning a model on collected data with measurable improvement
+> - TensorRT / ONNX optimization with latency benchmarks
+> - Multi-face tracking across frames (e.g. DeepSORT)
+> - Training on NSCC Aspire2a with A100 GPUs and documenting the HPC workflow
+
+> [!IMPORTANT]
+> The rubric values **demonstrated understanding** over mere tool usage. Using an off-the-shelf model is acceptable, but the team must be able to explain *why* it works and *how* it compares to alternatives during the oral interview.

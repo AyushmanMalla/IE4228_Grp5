@@ -1,0 +1,22 @@
+.agent
+.DS_Store
+.venv
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# Data & models (large files)
+Assignment2/data/
+Assignment2/models/
+*.npz
+*.onnx
+*.pth
+*.pt
+
+# OS
+.DS_Store
+Thumbs.db

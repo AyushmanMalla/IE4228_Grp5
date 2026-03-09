@@ -1,0 +1,204 @@
+# Implementation Plan: Assignment 2 — Categories 1–3
+
+## Goal
+
+Build a modular, test-driven face detection and recognition pipeline targeting the **Excellent** tier in rubric categories 1 (Detection), 2 (Recognition), and 3 (Data Engineering). Local prototyping on Mac + full training on NSCC Aspire2a A100s.
+
+---
+
+## Proposed Changes
+
+### Project Structure
+
+```
+Assignment2/
+├── litReview.md              # (existing)
+├── requirements.txt          # pip dependencies
+├── pyproject.toml             # project metadata + pytest config
+├── src/
+│   └── facerec/
+│       ├── __init__.py
+│       ├── config.py          # paths, thresholds, model configs
+│       ├── detector.py        # face detection (RetinaFace + SCRFD)
+│       ├── alignment.py       # 5-point alignment + crop
+│       ├── recognizer.py      # embedding extraction (AdaFace/ArcFace)
+│       ├── database.py        # gallery management (add/remove/query)
+│       └── pipeline.py        # end-to-end: image → detections → embeddings → matches
+├── tests/
+│   ├── conftest.py            # shared fixtures (sample images, temp dirs)
+│   ├── test_detector.py       # detection tests
+│   ├── test_alignment.py      # alignment tests
+│   ├── test_recognizer.py     # embedding tests
+│   ├── test_database.py       # gallery CRUD tests
+│   └── test_pipeline.py       # integration tests
+├── scripts/
+│   ├── download_lfw.py        # download LFW for local prototyping
+│   ├── build_gallery.py       # build a gallery DB from a folder of images
+│   └── benchmark.py           # FPS + accuracy measurement
+├── nscc_scripts/
+│   ├── setup_env.sh           # venv setup on Aspire2a
+│   ├── download_data.pbs      # PBS job to download VGGFace2
+│   ├── train_recognition.pbs  # PBS job for fine-tuning recognition model
+│   └── benchmark.pbs          # PBS job for GPU benchmarking
+├── data/                      # .gitignored — local data
+│   ├── lfw/                   # LFW dataset (downloaded by script)
+│   └── gallery/               # gallery images organized by identity
+└── models/                    # .gitignored — downloaded/trained model weights
+```
+
+---
+
+### Component Details
+
+#### [NEW] [config.py](file:///Users/ayushman/Documents/CODES/IE4228_Grp5/Assignment2/src/facerec/config.py)
+
+Central configuration dataclass:
+- Model names and weight paths (with auto-download fallback)
+- Detection confidence threshold (default 0.5)
+- Recognition similarity threshold (default 0.35)
+- Image size for alignment (112×112)
+- Device selection (CPU for Mac prototyping, CUDA for NSCC)
+
+---
+
+#### [NEW] [detector.py](file:///Users/ayushman/Documents/CODES/IE4228_Grp5/Assignment2/src/facerec/detector.py)
+
+Two detector backends via `insightface`:
+- **RetinaFace** (ResNet-50 backbone) — high accuracy
+- **SCRFD** (10GF variant) — high speed
+
+Interface:
+```python
+class FaceDetector:
+    def __init__(self, model_name: str = "retinaface_r50_v1", device: str = "cpu")
+    def detect(self, image: np.ndarray) -> list[Detection]
+    # Detection = dataclass(bbox, confidence, landmarks_5pt)
+```
+
+This satisfies rubric 1 "Compares ≥2 detectors" for **Excellent**.
+
+---
+
+#### [NEW] [alignment.py](file:///Users/ayushman/Documents/CODES/IE4228_Grp5/Assignment2/src/facerec/alignment.py)
+
+5-point landmark alignment using `skimage.transform.SimilarityTransform`:
+```python
+def align_face(image: np.ndarray, landmarks: np.ndarray, output_size: int = 112) -> np.ndarray
+```
+
+---
+
+#### [NEW] [recognizer.py](file:///Users/ayushman/Documents/CODES/IE4228_Grp5/Assignment2/src/facerec/recognizer.py)
+
+Embedding extraction using `insightface` model zoo:
+```python
+class FaceRecognizer:
+    def __init__(self, model_name: str = "arcface_r100", device: str = "cpu")
+    def get_embedding(self, aligned_face: np.ndarray) -> np.ndarray  # 512-d
+    def compute_similarity(self, emb1, emb2) -> float  # cosine sim
+```
+
+Supports ArcFace (R100) by default; AdaFace via custom weight loading for NSCC fine-tuning.
+
+---
+
+#### [NEW] [database.py](file:///Users/ayushman/Documents/CODES/IE4228_Grp5/Assignment2/src/facerec/database.py)
+
+Gallery management with NumPy + JSON persistence:
+```python
+class GalleryDatabase:
+    def __init__(self, db_path: str)
+    def add_identity(self, name: str, embeddings: list[np.ndarray])
+    def remove_identity(self, name: str)
+    def query(self, embedding: np.ndarray, threshold: float = 0.35) -> tuple[str, float]
+    def list_identities(self) -> list[str]
+    def save(self) / load(self)
+```
+
+Stores embeddings as `.npz`, metadata as `gallery.json`.
+
+---
+
+#### [NEW] [pipeline.py](file:///Users/ayushman/Documents/CODES/IE4228_Grp5/Assignment2/src/facerec/pipeline.py)
+
+End-to-end orchestrator:
+```python
+class FaceRecognitionPipeline:
+    def __init__(self, config: Config)
+    def process_image(self, image: np.ndarray) -> list[Result]
+    # Result = dataclass(bbox, name, confidence, embedding)
+```
+
+---
+
+### NSCC Scripts
+
+#### [NEW] [setup_env.sh](file:///Users/ayushman/Documents/CODES/IE4228_Grp5/Assignment2/nscc_scripts/setup_env.sh)
+
+```bash
+module purge
+module load python/3.10.4
+python -m venv /scratch/$USER/facerec-env
+source /scratch/$USER/facerec-env/bin/activate
+pip install -r requirements.txt
+```
+
+#### [NEW] [train_recognition.pbs](file:///Users/ayushman/Documents/CODES/IE4228_Grp5/Assignment2/nscc_scripts/train_recognition.pbs)
+
+PBS job requesting 1 node, 4× A100 GPUs, 4h walltime for fine-tuning ArcFace/AdaFace on VGGFace2.
+
+---
+
+### Dataset Strategy
+
+| Scenario | Dataset | Location |
+|----------|---------|----------|
+| Local prototyping | LFW (13k images, 5.7k identities) | `data/lfw/` |
+| NSCC training | VGGFace2 (3.3M images, 9.1k identities) | `/scratch/$USER/vggface2/` |
+| Gallery (demo) | Team photos + LFW subset (stand-in) | `data/gallery/` |
+
+Since teammate photos are unavailable, we'll select 5 LFW identities with ≥15 images each to simulate the gallery.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Python version**: The existing `.venv` is Python 3.9.6 (Xcode). We need Python 3.10+ for `insightface` and modern type hints. I'll recreate the venv with Homebrew Python or `python3.10` if available. Please confirm you have a Python ≥3.10 installed (run `python3 --version`).
+
+> [!IMPORTANT]
+> **`insightface` library**: This is the best single library that bundles RetinaFace, SCRFD, ArcFace models with a unified API. It depends on `onnxruntime` for inference (no GPU needed locally). Acceptable?
+
+---
+
+## Verification Plan
+
+### Automated Tests (TDD-first — `pytest`)
+
+All tests written **before** implementation per the TDD skill.
+
+Run command:
+```bash
+cd /Users/ayushman/Documents/CODES/IE4228_Grp5/Assignment2
+source ../.venv/bin/activate
+python -m pytest tests/ -v
+```
+
+| Test file | What it covers | Key assertions |
+|-----------|---------------|----------------|
+| `test_detector.py` | Load model, detect faces in a known image, verify bbox format and count | Detection returns ≥1 face on a known face image; bbox is `[x1,y1,x2,y2]` with valid coords; confidence ∈ (0,1]; 5 landmarks per face |
+| `test_alignment.py` | Align a detected face, verify output shape and pixel range | Output shape is `(112, 112, 3)`; pixel values in `[0, 255]`; aligned face is different from raw crop |
+| `test_recognizer.py` | Generate embeddings, verify dimensionality and similarity properties | Embedding shape is `(512,)`; same-person similarity > 0.5; different-person similarity < 0.3; embedding is unit-normalized |
+| `test_database.py` | CRUD operations on gallery | Add identity → list shows it; remove → gone; query same person → correct name; query unknown → returns "Unknown"; save/load round-trip preserves data |
+| `test_pipeline.py` | End-to-end on a test image | Known face returns correct name; unknown face returns "Unknown"; multiple faces in one image all detected |
+
+### Manual Verification
+
+After all tests green, run the benchmark script:
+```bash
+python scripts/benchmark.py --data-dir data/lfw --gallery-dir data/gallery
+```
+This prints:
+- Detection FPS
+- Recognition accuracy on held-out LFW pairs
+- Gallery match accuracy
