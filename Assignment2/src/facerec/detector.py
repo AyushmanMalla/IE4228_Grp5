@@ -100,8 +100,7 @@ class FaceDetector:
                 Detection(
                     bbox=face.bbox.astype(np.float32),  # (4,)
                     confidence=conf,
-                    landmarks=face.landmark_2d_106[:5] if face.landmark_2d_106 is not None
-                    else (face.kps if face.kps is not None else np.zeros((5, 2))),
+                    landmarks=face.kps if face.kps is not None else np.zeros((5, 2)),
                 )
             )
 
