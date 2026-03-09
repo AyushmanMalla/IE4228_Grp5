@@ -1,0 +1,38 @@
+#!/bin/bash
+#PBS -N FaceRec_Bench
+#PBS -q ai
+#PBS -P <YourProjectID>
+#PBS -l walltime=00:30:00
+#PBS -l select=1:ncpus=16:ngpus=1
+#PBS -j oe
+
+# ===========================================================================
+#  NSCC Aspire2a — Benchmark Detection + Recognition Pipeline
+#
+#  Measures FPS and accuracy on a single A100.
+#  Submit:   qsub nscc_scripts/benchmark.pbs
+# ===========================================================================
+
+set -euo pipefail
+
+echo "=== Benchmark started on $(hostname) at $(date) ==="
+
+cd "$PBS_O_WORKDIR" || exit 1
+
+module purge
+module load python/3.10.4
+
+SCRATCH="/scratch/$USER"
+source "$SCRATCH/facerec-env/bin/activate"
+
+# GPU check
+nvidia-smi
+
+echo "Running benchmark..."
+python scripts/benchmark.py \
+    --data-dir "$SCRATCH/lfw" \
+    --gallery-dir "$SCRATCH/gallery" \
+    --device cuda \
+    --num-images 500
+
+echo "=== Benchmark finished at $(date) ==="

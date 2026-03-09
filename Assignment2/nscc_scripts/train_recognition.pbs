@@ -1,0 +1,59 @@
+#!/bin/bash
+#PBS -N FaceRec_Train
+#PBS -q ai
+#PBS -P <YourProjectID>
+#PBS -l walltime=04:00:00
+#PBS -l select=1:ncpus=16:ngpus=4
+#PBS -j oe
+
+# ===========================================================================
+#  NSCC Aspire2a — Fine-tune Face Recognition Model
+#
+#  Requests 1 node with 4× A100 GPUs for 4 hours.
+#  Trains/fine-tunes ArcFace or AdaFace on VGGFace2 or custom gallery data.
+#
+#  Submit:   qsub nscc_scripts/train_recognition.pbs
+#  Monitor:  qstat -u $USER
+# ===========================================================================
+
+set -euo pipefail
+
+echo "=== Job started on $(hostname) at $(date) ==="
+
+# --- Navigate to working directory ---
+cd "$PBS_O_WORKDIR" || exit 1
+
+# --- Environment ---
+module purge
+module load python/3.10.4
+
+SCRATCH="/scratch/$USER"
+source "$SCRATCH/facerec-env/bin/activate"
+
+# --- GPU verification ---
+echo "GPU allocation:"
+nvidia-smi
+echo "CUDA_VISIBLE_DEVICES = $CUDA_VISIBLE_DEVICES"
+
+# --- Stage data to local NVMe (fast I/O) ---
+echo "Staging data to /raid..."
+DATA_LOCAL="/raid/$USER/vggface2"
+mkdir -p "$DATA_LOCAL"
+rsync -a "$SCRATCH/vggface2/" "$DATA_LOCAL/"
+echo "Data staged: $(du -sh $DATA_LOCAL)"
+
+# --- Train ---
+echo "Starting training..."
+python -m facerec.train \
+    --data-dir "$DATA_LOCAL" \
+    --model arcface_r100 \
+    --epochs 20 \
+    --batch-size 256 \
+    --lr 0.1 \
+    --output-dir "$SCRATCH/facerec-models/$(date +%F-%H%M)"
+
+# --- Archive results ---
+echo "Archiving model to project space..."
+# cp -r "$SCRATCH/facerec-models/..." "/home/project/$PROJECT_ID/..."
+
+echo "=== Job finished at $(date) ==="
