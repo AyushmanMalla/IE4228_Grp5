@@ -1,0 +1,13 @@
+[project]
+name = "ie4228-facerec"
+version = "0.1.0"
+description = "IE4228 Assignment 2 — Deep Learning Face Detection & Recognition"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"
+
+[tool.setuptools.packages.find]
+where = ["src"]
