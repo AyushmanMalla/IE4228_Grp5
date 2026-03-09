@@ -1,3 +1,6 @@
+# Install this project (facerec) in editable mode
+-e .
+
 # Core ML / CV
 insightface>=0.7.3
 onnxruntime>=1.17.0            # CPU inference (local prototyping)

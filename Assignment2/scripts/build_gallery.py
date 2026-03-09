@@ -1,18 +1,19 @@
 """Build a gallery database from a folder of face images.
 
-Expects the folder structure:
-    gallery_images/
-        Alice/
+Expects the folder structure (e.g. LFW):
+    images_dir/
+        PersonName/
             img1.jpg
             img2.jpg
-        Bob/
-            img1.jpg
-            ...
+        ...
+
+By default, auto-selects the top-N identities with the most images.
 
 Usage:
     python scripts/build_gallery.py \
-        --images-dir data/gallery_images \
+        --images-dir data/lfw/lfw \
         --output-dir data/gallery \
+        [--top-n 5] \
         [--device cpu]
 """
 
@@ -26,29 +27,57 @@ import numpy as np
 from tqdm import tqdm
 
 from facerec.alignment import align_face
-from facerec.config import Config
 from facerec.database import GalleryDatabase
 from facerec.detector import FaceDetector
 from facerec.recognizer import FaceRecognizer
 
 
-def build_gallery(images_dir: Path, output_dir: Path, device: str = "cpu") -> None:
-    """Detect, align, embed all images and save as a gallery DB."""
+def _rank_identities(images_dir: Path, top_n: int | None) -> list[Path]:
+    """Return person directories sorted by image count (descending).
+
+    If top_n is set, only the top-N identities are returned.
+    """
+    person_dirs = [d for d in sorted(images_dir.iterdir()) if d.is_dir()]
+
+    # Count images per person
+    ranked = []
+    for d in person_dirs:
+        count = len(list(d.glob("*.jpg")) + list(d.glob("*.png")))
+        if count > 0:
+            ranked.append((d, count))
+
+    ranked.sort(key=lambda x: x[1], reverse=True)
+
+    if top_n is not None:
+        ranked = ranked[:top_n]
+
+    print(f"Selected {len(ranked)} identities:")
+    for d, count in ranked:
+        print(f"  {d.name:30s}  {count:>4d} images")
+    print()
+
+    return [d for d, _ in ranked]
+
+
+def build_gallery(
+    images_dir: Path,
+    output_dir: Path,
+    device: str = "cpu",
+    top_n: int | None = 5,
+) -> None:
+    """Detect, align, embed images and save as a gallery DB."""
     detector = FaceDetector(device=device)
     recognizer = FaceRecognizer(device=device)
     db = GalleryDatabase(output_dir)
 
-    for person_dir in sorted(images_dir.iterdir()):
-        if not person_dir.is_dir():
-            continue
+    person_dirs = _rank_identities(images_dir, top_n)
 
+    for person_dir in person_dirs:
         name = person_dir.name
         embeddings: list[np.ndarray] = []
         img_files = sorted(person_dir.glob("*.jpg")) + sorted(person_dir.glob("*.png"))
 
-        print(f"Processing {name}: {len(img_files)} images")
-
-        for img_path in tqdm(img_files, desc=name, leave=False):
+        for img_path in tqdm(img_files, desc=name, leave=True):
             img = cv2.imread(str(img_path))
             if img is None:
                 print(f"  Warning: could not read {img_path}")
@@ -56,7 +85,6 @@ def build_gallery(images_dir: Path, output_dir: Path, device: str = "cpu") -> No
 
             detections = detector.detect(img)
             if not detections:
-                print(f"  Warning: no face found in {img_path.name}")
                 continue
 
             # Use highest-confidence detection
@@ -67,9 +95,9 @@ def build_gallery(images_dir: Path, output_dir: Path, device: str = "cpu") -> No
 
         if embeddings:
             db.add_identity(name, embeddings)
-            print(f"  → Added {name} with {len(embeddings)} embeddings")
+            print(f"  → {name}: {len(embeddings)}/{len(img_files)} images embedded")
         else:
-            print(f"  ⚠ No valid embeddings for {name}")
+            print(f"  ⚠ {name}: no valid embeddings")
 
     db.save()
     print(f"\nGallery saved to {output_dir}")
@@ -77,16 +105,21 @@ def build_gallery(images_dir: Path, output_dir: Path, device: str = "cpu") -> No
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build gallery database")
-    parser.add_argument("--images-dir", type=Path, required=True)
+    parser = argparse.ArgumentParser(description="Build gallery database from face images")
+    parser.add_argument("--images-dir", type=Path, required=True,
+                        help="Root dir with person-named sub-folders of images")
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path(__file__).resolve().parents[1] / "data" / "gallery",
     )
+    parser.add_argument("--top-n", type=int, default=5,
+                        help="Auto-select top N identities by image count (default: 5, use 0 for all)")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
     args = parser.parse_args()
-    build_gallery(args.images_dir, args.output_dir, args.device)
+
+    top_n = args.top_n if args.top_n > 0 else None
+    build_gallery(args.images_dir, args.output_dir, args.device, top_n)
 
 
 if __name__ == "__main__":
