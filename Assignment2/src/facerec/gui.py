@@ -92,7 +92,7 @@ class FaceRecognitionGUI:
     SIDEBAR_W = 280
     
     # Optimization tweaks
-    DETECT_EVERY_N_FRAMES = 10
+    DETECT_EVERY_N_FRAMES = 3
     DETECT_SCALE = 0.5   # Downscale frame for detection
 
     def __init__(
@@ -368,14 +368,14 @@ class FaceRecognitionGUI:
                 pass
 
     def _init_tracker(self, face: TrackedFace, frame: np.ndarray) -> None:
-        """Initialize OpenCV CSRT tracker for a face bounding box."""
+        """Initialize OpenCV KCF tracker for a face bounding box."""
         try:
             # Most modern OpenCV builds
-            face.tracker = cv2.TrackerCSRT_create()
+            face.tracker = cv2.TrackerKCF_create()
         except AttributeError:
             # Older/headless OpenCV
             try:
-                face.tracker = cv2.legacy.TrackerCSRT_create()
+                face.tracker = cv2.legacy.TrackerKCF_create()
             except AttributeError:
                 face.tracker = None
                 return
@@ -400,12 +400,17 @@ class FaceRecognitionGUI:
             self._root.after(100, self._process_frame)
             return
 
-        t0 = time.perf_counter()
-
         ret, frame = self._cap.read()
         if not ret:
             self._root.after(30, self._process_frame)
             return
+
+        current_time = time.perf_counter()
+        if hasattr(self, "_prev_frame_time"):
+            elapsed = current_time - self._prev_frame_time
+        else:
+            elapsed = 0.033
+        self._prev_frame_time = current_time
 
         # Resize for display
         display_frame = cv2.resize(frame, (self.VIDEO_W, self.VIDEO_H))
@@ -441,7 +446,6 @@ class FaceRecognitionGUI:
             self._draw_detection(display_frame, result)
 
         # --- FPS ---
-        elapsed = time.perf_counter() - t0
         self._frame_times.append(elapsed)
         if len(self._frame_times) > 30:
             self._frame_times.pop(0)

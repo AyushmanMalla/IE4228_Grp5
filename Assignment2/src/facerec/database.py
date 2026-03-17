@@ -29,6 +29,9 @@ class GalleryDatabase:
 
         # In-memory store: name → list of 512-d embeddings
         self._identities: dict[str, list[np.ndarray]] = {}
+        self._gallery_matrix: np.ndarray | None = None
+        self._gallery_names: list[str] = []
+        self._matrix_stale: bool = True
 
     # ------------------------------------------------------------------
     # CRUD
@@ -39,12 +42,36 @@ class GalleryDatabase:
         if not embeddings:
             raise ValueError("Must provide at least one embedding")
         self._identities[name] = [e.astype(np.float32) for e in embeddings]
+        self._matrix_stale = True
 
     def remove_identity(self, name: str) -> None:
         """Remove an identity by name.  Raises ``KeyError`` if not found."""
         if name not in self._identities:
             raise KeyError(f"Identity '{name}' not in gallery")
         del self._identities[name]
+        self._matrix_stale = True
+
+    def _build_index(self) -> None:
+        if not self._identities:
+            self._gallery_matrix = None
+            self._gallery_names = []
+            self._matrix_stale = False
+            return
+
+        embs = []
+        names = []
+        for name, emb_list in self._identities.items():
+            for stored in emb_list:
+                s_norm = np.linalg.norm(stored)
+                if s_norm > 0:
+                    embs.append(stored / s_norm)
+                else:
+                    embs.append(stored)
+                names.append(name)
+        
+        self._gallery_matrix = np.stack(embs) # Shape: (N, 512)
+        self._gallery_names = names
+        self._matrix_stale = False
 
     def list_identities(self) -> list[str]:
         """Return sorted list of identity names."""
@@ -77,30 +104,25 @@ class GalleryDatabase:
         if not self._identities:
             return ("Unknown", 0.0)
 
+        if self._matrix_stale:
+            self._build_index()
+
+        if self._gallery_matrix is None:
+            return ("Unknown", 0.0)
+
         embedding = embedding.astype(np.float32)
         e_norm = np.linalg.norm(embedding)
         if e_norm > 0:
             embedding = embedding / e_norm
 
-        best_name = "Unknown"
-        best_score = -1.0
-
-        for name, embs in self._identities.items():
-            for stored in embs:
-                s_norm = np.linalg.norm(stored)
-                if s_norm > 0:
-                    stored_normed = stored / s_norm
-                else:
-                    stored_normed = stored
-                score = float(np.dot(embedding, stored_normed))
-                if score > best_score:
-                    best_score = score
-                    best_name = name
+        scores = np.dot(self._gallery_matrix, embedding)
+        best_idx = int(np.argmax(scores))
+        best_score = float(scores[best_idx])
 
         if best_score < threshold:
             return ("Unknown", best_score)
 
-        return (best_name, best_score)
+        return (self._gallery_names[best_idx], best_score)
 
     # ------------------------------------------------------------------
     # Persistence
@@ -136,3 +158,4 @@ class GalleryDatabase:
                 self._identities[name] = [
                     arr[i].astype(np.float32) for i in range(arr.shape[0])
                 ]
+        self._matrix_stale = True

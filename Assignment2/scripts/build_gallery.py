@@ -25,6 +25,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 from tqdm import tqdm
+ 
+SUPPORTED_EXTENSIONS = ("*.jpg", "*.jpeg", "*.png")
 
 from facerec.alignment import align_face
 from facerec.database import GalleryDatabase
@@ -42,7 +44,7 @@ def _rank_identities(images_dir: Path, top_n: int | None) -> list[Path]:
     # Count images per person
     ranked = []
     for d in person_dirs:
-        count = len(list(d.glob("*.jpg")) + list(d.glob("*.png")))
+        count = sum(len(list(d.glob(ext))) for ext in SUPPORTED_EXTENSIONS)
         if count > 0:
             ranked.append((d, count))
 
@@ -75,7 +77,10 @@ def build_gallery(
     for person_dir in person_dirs:
         name = person_dir.name
         embeddings: list[np.ndarray] = []
-        img_files = sorted(person_dir.glob("*.jpg")) + sorted(person_dir.glob("*.png"))
+        img_files = []
+        for ext in SUPPORTED_EXTENSIONS:
+            img_files.extend(person_dir.glob(ext))
+        img_files.sort()
 
         for img_path in tqdm(img_files, desc=name, leave=True):
             img = cv2.imread(str(img_path))
