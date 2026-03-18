@@ -473,14 +473,14 @@ class MainWindow(QMainWindow):
         sidebar = QVBoxLayout()
         sidebar.setSpacing(16)
         
-        # Sidebar config
-        panel_style = f"background-color: {Theme.BG_SECONDARY}; border-radius: 12px; padding: 16px;"
+        # Use QFrame selector so children (QLabel) don't inherit the background or padding
+        panel_style = f"QFrame {{ background-color: {Theme.BG_SECONDARY}; border-radius: 12px; }}"
         
         # 1. Status Panel
         p_status = QFrame()
         p_status.setStyleSheet(panel_style)
-        p_status.setMinimumHeight(140)
         l_status = QVBoxLayout(p_status)
+        l_status.setContentsMargins(16, 16, 16, 16)
         l_status.setSpacing(8)
         
         self.status_lbl = QLabel("● SYSTEM ACTIVE")
@@ -498,8 +498,9 @@ class MainWindow(QMainWindow):
         # 2. Controls Panel
         p_ctrl = QFrame()
         p_ctrl.setStyleSheet(panel_style)
-        p_ctrl.setMinimumHeight(120)
         l_ctrl = QVBoxLayout(p_ctrl)
+        l_ctrl.setContentsMargins(16, 16, 16, 16)
+        l_ctrl.setSpacing(12)
         
         lbl_control = QLabel("Similarity Threshold:")
         lbl_control.setStyleSheet(f"font-family: {Theme.FONT_BODY}; color: {Theme.TEXT_PRIMARY};")
@@ -510,6 +511,7 @@ class MainWindow(QMainWindow):
         self.slider.setMaximum(80)
         self.slider.setValue(35)
         self.slider_lbl = QLabel("0.35")
+        self.slider_lbl.setMinimumWidth(35)
         self.slider_lbl.setStyleSheet(f"font-family: {Theme.FONT_MONO}; color: {Theme.ACCENT_BLUE};")
         
         # Update label immediately on drag
@@ -524,8 +526,9 @@ class MainWindow(QMainWindow):
         # 3. Live Stats Panel
         p_stats = QFrame()
         p_stats.setStyleSheet(panel_style)
-        p_stats.setMinimumHeight(130)
         l_stats = QVBoxLayout(p_stats)
+        l_stats.setContentsMargins(16, 16, 16, 16)
+        l_stats.setSpacing(8)
         
         head = QLabel("CURRENT FRAME STATS")
         head.setStyleSheet(f"color: {Theme.ACCENT_ORANGE}; font-family: {Theme.FONT_HEADING}; font-weight: bold; font-size: 12px;")
@@ -551,6 +554,8 @@ class MainWindow(QMainWindow):
         p_gal.setStyleSheet(panel_style)
         l_gal = QVBoxLayout(p_gal)
         l_gal.setAlignment(Qt.AlignmentFlag.AlignTop)
+        l_gal.setContentsMargins(16, 16, 16, 16)
+        l_gal.setSpacing(12)
         
         head_gal = QLabel("LOADED GALLERY")
         head_gal.setStyleSheet(f"color: {Theme.ACCENT_ORANGE}; font-family: {Theme.FONT_HEADING}; font-weight: bold; font-size: 12px;")
