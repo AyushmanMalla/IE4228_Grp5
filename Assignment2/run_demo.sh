@@ -27,7 +27,7 @@ fi
 echo "[3/4] Building facial embedding gallery..."
 if [ ! -d "data/gallery" ] || [ ! -f "data/gallery/gallery.json" ]; then
     echo "Building gallery with top 5 identities..."
-    python scripts/build_gallery.py --images-dir data/lfw --output-dir data/gallery --top-n 5
+    python scripts/build_gallery.py --images-dir data/team_photos --output-dir data/gallery --top-n 0
 else
     echo "Gallery already exists. Skipping build."
 fi

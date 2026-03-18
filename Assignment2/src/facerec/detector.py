@@ -59,6 +59,8 @@ class FaceDetector:
         providers: list[str]
         if self._device == "cuda":
             providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        elif self._device == "mps":
+            providers = ["CoreMLExecutionProvider", "CPUExecutionProvider"]
         else:
             providers = ["CPUExecutionProvider"]
 
@@ -66,7 +68,7 @@ class FaceDetector:
             name=self._model_name,
             providers=providers,
         )
-        self._app.prepare(ctx_id=0 if self._device == "cuda" else -1)
+        self._app.prepare(ctx_id=0 if self._device in ("cuda", "mps") else -1)
 
     # ------------------------------------------------------------------
     # Public API

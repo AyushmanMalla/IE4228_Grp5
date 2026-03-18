@@ -48,7 +48,12 @@ class Config:
         if self.device == "auto":
             try:
                 import torch
-                self.device = "cuda" if torch.cuda.is_available() else "cpu"
+                if torch.backends.mps.is_available():
+                    self.device = "mps"
+                elif torch.cuda.is_available():
+                    self.device = "cuda"
+                else:
+                    self.device = "cpu"
             except ImportError:
                 self.device = "cpu"
 

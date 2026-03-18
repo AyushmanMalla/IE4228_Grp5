@@ -43,6 +43,8 @@ class FaceRecognizer:
         providers: list[str]
         if self._device == "cuda":
             providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        elif self._device == "mps":
+            providers = ["CoreMLExecutionProvider", "CPUExecutionProvider"]
         else:
             providers = ["CPUExecutionProvider"]
 
@@ -50,7 +52,7 @@ class FaceRecognizer:
             name=self._model_name,
             providers=providers,
         )
-        app.prepare(ctx_id=0 if self._device == "cuda" else -1)
+        app.prepare(ctx_id=0 if self._device in ("cuda", "mps") else -1)
 
         # Extract the recognition model from the analysis app
         for model in app.models.values():
