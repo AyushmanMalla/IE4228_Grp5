@@ -39,23 +39,22 @@ from facerec.recognizer import FaceRecognizer
 
 
 # ---------------------------------------------------------------------------
-# Design tokens  (Dark Mode OLED + status indicators)
+# Design tokens  (Anthropic Brand Styling)
 # ---------------------------------------------------------------------------
 class Theme:
-    BG_PRIMARY = "#0A0E1A"       # deep navy-black
-    BG_SECONDARY = "#111827"     # panel background
-    BG_CARD = "#1E293B"          # card / sidebar panel
-    BORDER = "#334155"           # subtle borders
-    TEXT_PRIMARY = "#F1F5F9"     # near-white
-    TEXT_SECONDARY = "#94A3B8"   # muted grey
-    TEXT_DIM = "#64748B"         # dimmer text
-    ACCENT_BLUE = "#3B82F6"      # primary accent
-    ACCENT_GREEN = "#22C55E"     # known / success
-    ACCENT_RED = "#EF4444"       # unknown / alert
-    ACCENT_AMBER = "#F59E0B"     # warning / medium conf
-    ACCENT_CYAN = "#06B6D4"      # info highlight
+    BG_PRIMARY = "#141413"       # Dark Primary
+    BG_SECONDARY = "#2a2a29"     # Slightly lighter panel background (custom)
+    BG_CARD = "#b0aea5"          # Mid Gray
+    BORDER = "#334155"           # Subdued border
+    TEXT_PRIMARY = "#faf9f5"     # Light Text
+    TEXT_SECONDARY = "#b0aea5"   # Mid Gray
+    TEXT_DIM = "#8c8c88"         # custom muted
+    ACCENT_ORANGE = "#d97757"    # Anthropic Primary Accent
+    ACCENT_BLUE = "#6a9bcc"      # Anthropic Secondary Accent
+    ACCENT_GREEN = "#788c5d"     # Anthropic Tertiary Accent
 
-    FONT_FAMILY = "Helvetica Neue"
+    FONT_HEADING = "Poppins"
+    FONT_BODY = "Lora"
     FONT_MONO = "SF Mono"
 
 def hex_to_qcolor(hex_str: str, alpha: int = 255) -> QColor:
@@ -285,12 +284,14 @@ class VideoOverlayWidget(QWidget):
         self.current_detections: list[dict] = []
         
         # UI Font setup
-        self.font_main = QFont(Theme.FONT_FAMILY, 14, QFont.Weight.Bold)
-        self.font_small = QFont(Theme.FONT_FAMILY, 11, QFont.Weight.Normal)
+        self.font_main = QFont(Theme.FONT_HEADING, 14, QFont.Weight.Bold)
+        self.font_small = QFont(Theme.FONT_BODY, 11, QFont.Weight.Normal)
         
-        # Scaling tracker
-        self._scale_factor_x = 1.0
-        self._scale_factor_y = 1.0
+        # We need the drawn bounding box coordinates inside the widget relative to the painted video format
+        self._painted_rect_w = 1.0
+        self._painted_rect_h = 1.0
+        self._video_x_offset = 0
+        self._video_y_offset = 0
 
     @Slot(np.ndarray)
     def set_frame(self, frame_rgb: np.ndarray) -> None:
@@ -316,15 +317,24 @@ class VideoOverlayWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         
-        # 1. Draw the Video Frame scaled to widget size
+        # 1. Draw the Video Frame scaled to preserve aspect ratio
         rect = self.rect()
-        painter.drawPixmap(rect, self.current_pixmap)
+        scaled_pixmap = self.current_pixmap.scaled(
+            rect.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+        )
         
-        # Calculate scaling coefficients if the video aspect ratio changed
+        # Calculate offsets to center the video if there's letterboxing
+        x_offset = (rect.width() - scaled_pixmap.width()) // 2
+        y_offset = (rect.height() - scaled_pixmap.height()) // 2
+        
+        painter.drawPixmap(x_offset, y_offset, scaled_pixmap)
+        
+        # Save exact dimensions of the painted video area for scaling coordinates safely
         orig_w = self.current_pixmap.width()
         orig_h = self.current_pixmap.height()
-        self._scale_factor_x = rect.width() / orig_w
-        self._scale_factor_y = rect.height() / orig_h
+        
+        scale_x = scaled_pixmap.width() / orig_w
+        scale_y = scaled_pixmap.height() / orig_h
 
         # 2. Draw the bounding boxes and text directly
         for det in self.current_detections:
@@ -333,16 +343,18 @@ class VideoOverlayWidget(QWidget):
             score = det["score"]
             is_known = name != "Unknown"
             
-            # Scale coordinates to current window size
-            sx1, sy1 = int(x1 * self._scale_factor_x), int(y1 * self._scale_factor_y)
-            sx2, sy2 = int(x2 * self._scale_factor_x), int(y2 * self._scale_factor_y)
+            # Scale coordinates and add the letterbox offset
+            sx1 = int(x1 * scale_x) + x_offset
+            sy1 = int(y1 * scale_y) + y_offset
+            sx2 = int(x2 * scale_x) + x_offset
+            sy2 = int(y2 * scale_y) + y_offset
             sw, sh = sx2 - sx1, sy2 - sy1
             
-            # Choose colors
+            # Choose colors (Anthropic palette)
             if is_known:
-                base_color = hex_to_qcolor(Theme.ACCENT_AMBER if score < 0.5 else Theme.ACCENT_GREEN)
+                base_color = hex_to_qcolor(Theme.ACCENT_ORANGE if score < 0.5 else Theme.ACCENT_GREEN)
             else:
-                base_color = hex_to_qcolor(Theme.ACCENT_RED)
+                base_color = hex_to_qcolor(Theme.ACCENT_BLUE)
                 
             bg_color = hex_to_qcolor(Theme.BG_PRIMARY, 210) # 82% opacity overlay
             
@@ -380,7 +392,7 @@ class VideoOverlayWidget(QWidget):
             
             box_w = max(label_fm.horizontalAdvance(label_text), score_fm.horizontalAdvance(score_text)) + 24
             box_h = 56
-            box_y = max(sy1 - box_h - 8, 0)
+            box_y = max(sy1 - box_h - 8, y_offset)
             
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(bg_color)
@@ -459,22 +471,24 @@ class MainWindow(QMainWindow):
 
     def _build_sidebar(self) -> QVBoxLayout:
         sidebar = QVBoxLayout()
-        sidebar.setSpacing(12)
+        sidebar.setSpacing(16)
         
         # Sidebar config
-        panel_style = f"background-color: {Theme.BG_SECONDARY}; border-radius: 8px; padding: 12px;"
+        panel_style = f"background-color: {Theme.BG_SECONDARY}; border-radius: 12px; padding: 16px;"
         
         # 1. Status Panel
         p_status = QFrame()
         p_status.setStyleSheet(panel_style)
+        p_status.setMinimumHeight(140)
         l_status = QVBoxLayout(p_status)
+        l_status.setSpacing(8)
         
         self.status_lbl = QLabel("● SYSTEM ACTIVE")
-        self.status_lbl.setStyleSheet(f"color: {Theme.ACCENT_GREEN}; font-weight: bold;")
+        self.status_lbl.setStyleSheet(f"color: {Theme.ACCENT_GREEN}; font-family: {Theme.FONT_HEADING}; font-weight: bold;")
         self.status_hw = QLabel("Hardware: INIT")
-        self.status_hw.setStyleSheet(f"color: {Theme.TEXT_SECONDARY};")
+        self.status_hw.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-family: {Theme.FONT_BODY};")
         self.status_fps = QLabel("0.0 FPS")
-        self.status_fps.setStyleSheet(f"font-family: {Theme.FONT_MONO}; color: {Theme.ACCENT_CYAN}; font-size: 18px; font-weight: bold;")
+        self.status_fps.setStyleSheet(f"font-family: {Theme.FONT_MONO}; color: {Theme.ACCENT_BLUE}; font-size: 24px; font-weight: bold;")
         
         l_status.addWidget(self.status_lbl)
         l_status.addWidget(self.status_hw)
@@ -484,9 +498,12 @@ class MainWindow(QMainWindow):
         # 2. Controls Panel
         p_ctrl = QFrame()
         p_ctrl.setStyleSheet(panel_style)
+        p_ctrl.setMinimumHeight(120)
         l_ctrl = QVBoxLayout(p_ctrl)
         
-        l_ctrl.addWidget(QLabel("Similarity Threshold:"))
+        lbl_control = QLabel("Similarity Threshold:")
+        lbl_control.setStyleSheet(f"font-family: {Theme.FONT_BODY}; color: {Theme.TEXT_PRIMARY};")
+        l_ctrl.addWidget(lbl_control)
         
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setMinimum(10)
@@ -507,17 +524,21 @@ class MainWindow(QMainWindow):
         # 3. Live Stats Panel
         p_stats = QFrame()
         p_stats.setStyleSheet(panel_style)
+        p_stats.setMinimumHeight(130)
         l_stats = QVBoxLayout(p_stats)
         
-        head = QLabel("LIFETIME STATS")
-        head.setStyleSheet(f"color: {Theme.ACCENT_BLUE}; font-weight: bold; font-size: 11px;")
+        head = QLabel("CURRENT FRAME STATS")
+        head.setStyleSheet(f"color: {Theme.ACCENT_ORANGE}; font-family: {Theme.FONT_HEADING}; font-weight: bold; font-size: 12px;")
         l_stats.addWidget(head)
         
-        self.lbl_faces = QLabel("Faces: 0")
-        self.lbl_known = QLabel("Known: 0")
-        self.lbl_unknown = QLabel("Unknown: 0")
-        self.lbl_known.setStyleSheet(f"color: {Theme.ACCENT_GREEN};")
-        self.lbl_unknown.setStyleSheet(f"color: {Theme.ACCENT_RED};")
+        stat_style = f"font-family: {Theme.FONT_BODY}; font-size: 13px;"
+        
+        self.lbl_faces = QLabel("Total Faces: 0")
+        self.lbl_faces.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; {stat_style}")
+        self.lbl_known = QLabel("Known Matches: 0")
+        self.lbl_known.setStyleSheet(f"color: {Theme.ACCENT_GREEN}; {stat_style}")
+        self.lbl_unknown = QLabel("Unknown Faces: 0")
+        self.lbl_unknown.setStyleSheet(f"color: {Theme.ACCENT_BLUE}; {stat_style}")
         
         l_stats.addWidget(self.lbl_faces)
         l_stats.addWidget(self.lbl_known)
@@ -532,11 +553,11 @@ class MainWindow(QMainWindow):
         l_gal.setAlignment(Qt.AlignmentFlag.AlignTop)
         
         head_gal = QLabel("LOADED GALLERY")
-        head_gal.setStyleSheet(f"color: {Theme.ACCENT_BLUE}; font-weight: bold; font-size: 11px;")
+        head_gal.setStyleSheet(f"color: {Theme.ACCENT_ORANGE}; font-family: {Theme.FONT_HEADING}; font-weight: bold; font-size: 12px;")
         l_gal.addWidget(head_gal)
         
         self.gallery_container = QVBoxLayout()
-        self.gallery_container.setSpacing(4)
+        self.gallery_container.setSpacing(6)
         l_gal.addLayout(self.gallery_container)
         
         sidebar.addWidget(p_gal)
@@ -564,14 +585,13 @@ class MainWindow(QMainWindow):
 
     @Slot(list)
     def _update_stats(self, detections: list[dict]) -> None:
-        self._total_det += len(detections)
+        total = len(detections)
         known = sum(1 for d in detections if d["name"] != "Unknown")
-        self._total_known += known
-        self._total_unknown += (len(detections) - known)
+        unknown = total - known
         
-        self.lbl_faces.setText(f"Faces: {self._total_det}")
-        self.lbl_known.setText(f"Known: {self._total_known}")
-        self.lbl_unknown.setText(f"Unknown: {self._total_unknown}")
+        self.lbl_faces.setText(f"Faces in View: {total}")
+        self.lbl_known.setText(f"Known Matches: {known}")
+        self.lbl_unknown.setText(f"Unknown Faces: {unknown}")
 
     @Slot(list)
     def _update_gallery_list(self, names: list[str]) -> None:
