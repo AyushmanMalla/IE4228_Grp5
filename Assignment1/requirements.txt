@@ -1,0 +1,19 @@
+# Install this project (facerec_classical) in editable mode
+-e .
+
+# Core ML / CV
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+scikit-learn>=1.3.0
+scikit-image>=0.21.0
+
+# Utilities
+Pillow>=10.0.0
+tqdm>=4.65.0
+requests>=2.31.0
+kaggle>=1.5.12
+matplotlib>=3.7.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0

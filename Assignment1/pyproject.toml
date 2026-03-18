@@ -1,0 +1,13 @@
+[project]
+name = "ie4228-facerec-classical"
+version = "0.1.0"
+description = "IE4228 Assignment 1 — Traditional Face Detection & Recognition (PCA/LDA)"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -10,6 +10,7 @@ dist/
 build/
 
 # Data & models (large files)
+Assignment1/data/lfw
 Assignment2/data/
 Assignment2/models/
 *.npz
