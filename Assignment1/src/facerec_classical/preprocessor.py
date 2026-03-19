@@ -96,7 +96,7 @@ def preprocess_face(
     target_size: tuple[int, int] = (100, 100),
     gamma: float = 1.0,
 ) -> np.ndarray:
-    """Full pre-processing pipeline: grayscale → histogram eq → gamma → resize.
+    """Full pre-processing pipeline: grayscale → histogram eq → gamma → resize → HOG.
 
     Parameters
     ----------
@@ -110,10 +110,25 @@ def preprocess_face(
     Returns
     -------
     np.ndarray
-        Preprocessed grayscale face, shape ``target_size``, dtype ``uint8``.
+        Flattened 1D HOG feature vector representing the face.
     """
+    from skimage.feature import hog
+
     gray = to_grayscale(image)
     eq = equalize_histogram(gray)
     if gamma != 1.0:
         eq = gamma_correction(eq, gamma)
-    return resize_face(eq, target_size)
+    resized = resize_face(eq, target_size)
+    
+    # Extract HOG features to capture shape and texture (pose/lighting invariance)
+    # feature_vector=True ensures it returns a flattened 1D array
+    features = hog(
+        resized,
+        orientations=8,
+        pixels_per_cell=(8, 8),
+        cells_per_block=(2, 2),
+        block_norm='L2-Hys',
+        visualize=False,
+        feature_vector=True
+    )
+    return features

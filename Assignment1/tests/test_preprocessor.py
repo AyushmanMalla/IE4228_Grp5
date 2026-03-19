@@ -85,10 +85,10 @@ class TestPreprocessFace:
     def test_full_pipeline_output_shape(self, sample_bgr_image):
         from facerec_classical.preprocessor import preprocess_face
         result = preprocess_face(sample_bgr_image, target_size=(100, 100))
-        assert result.shape == (100, 100)
-        assert result.dtype == np.uint8
+        assert result.shape == (3872,)
+        assert result.dtype in (np.float32, np.float64)
 
     def test_full_pipeline_with_gamma(self, sample_bgr_image):
         from facerec_classical.preprocessor import preprocess_face
         result = preprocess_face(sample_bgr_image, target_size=(100, 100), gamma=1.5)
-        assert result.shape == (100, 100)
+        assert result.shape == (3872,)

@@ -103,7 +103,7 @@ class TestPredict:
 
     def test_predict_training_sample_returns_correct_label(self):
         from facerec_classical.recognizer import PCALDARecognizer
-        rec = PCALDARecognizer(n_components_pca=10, sed_threshold=1000.0)
+        rec = PCALDARecognizer(n_components_pca=10, sed_threshold=1.0)
         X, y = _make_training_data()
         rec.fit(X, y)
 
@@ -129,7 +129,7 @@ class TestEvaluate:
 
     def test_evaluate_returns_accuracy_dict(self):
         from facerec_classical.recognizer import PCALDARecognizer
-        rec = PCALDARecognizer(n_components_pca=10, sed_threshold=1000.0)
+        rec = PCALDARecognizer(n_components_pca=10, sed_threshold=1.0)
         X, y = _make_training_data()
         rec.fit(X, y)
 
@@ -141,7 +141,7 @@ class TestEvaluate:
 
     def test_evaluate_train_accuracy_is_high(self):
         from facerec_classical.recognizer import PCALDARecognizer
-        rec = PCALDARecognizer(n_components_pca=10, sed_threshold=1000.0)
+        rec = PCALDARecognizer(n_components_pca=10, sed_threshold=1.0)
         X, y = _make_training_data()
         rec.fit(X, y)
 

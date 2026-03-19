@@ -33,7 +33,7 @@ class PCALDARecognizer:
         self,
         n_components_pca: int = 50,
         n_components_lda: str | int = "auto",
-        sed_threshold: float = 50.0,
+        sed_threshold: float = 0.45,
     ) -> None:
         self._n_pca = n_components_pca
         self._n_lda = n_components_lda
@@ -137,7 +137,7 @@ class PCALDARecognizer:
         return lda_vec.flatten()
 
     def predict(self, face_vector: np.ndarray) -> tuple[str, float]:
-        """Predict identity using SED nearest-neighbour matching.
+        """Predict identity using Cosine nearest-neighbour matching.
 
         Parameters
         ----------
@@ -147,8 +147,10 @@ class PCALDARecognizer:
         Returns
         -------
         tuple[str, float]
-            ``(predicted_name, sed)`` — ``"Unknown"`` if SED > threshold.
+            ``(predicted_name, cosine_dist)`` — ``"Unknown"`` if dist > threshold.
         """
+        from scipy.spatial.distance import cosine
+        
         if not self.is_fitted:
             raise RuntimeError("Model not fitted. Call fit() first.")
 
@@ -158,7 +160,11 @@ class PCALDARecognizer:
         best_idx = -1
 
         for i, train_vec in enumerate(self._train_projected):  # type: ignore[union-attr]
-            dist = float(np.sum((test_proj - train_vec) ** 2))
+            # Handle empty or zero vectors
+            if np.linalg.norm(test_proj) == 0 or np.linalg.norm(train_vec) == 0:
+                continue
+            
+            dist = float(cosine(test_proj.flatten(), train_vec.flatten()))
             if dist < min_dist:
                 min_dist = dist
                 best_idx = self._train_labels[i]  # type: ignore[index]

@@ -38,7 +38,7 @@ class HaarFaceDetector:
         self,
         cascade_path: str = "",
         scale_factor: float = 1.1,
-        min_neighbors: int = 5,
+        min_neighbors: int = 7,
         min_size: tuple[int, int] = (30, 30),
     ) -> None:
         import cv2
