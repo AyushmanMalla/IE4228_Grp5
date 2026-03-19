@@ -1,6 +1,7 @@
 .agent
 .DS_Store
 .venv
+Assignment1/Assignment_1_Computer_vision.ipynb
 
 # Python
 __pycache__/
