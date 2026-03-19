@@ -13,6 +13,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from sklearn.preprocessing import LabelEncoder
+from sklearn.svm import OneClassSVM
 
 
 class PCALDARecognizer:
@@ -34,14 +35,17 @@ class PCALDARecognizer:
         n_components_pca: int = 50,
         n_components_lda: str | int = "auto",
         sed_threshold: float = 0.45,
+        svm_nu: float = 0.05,
     ) -> None:
         self._n_pca = n_components_pca
         self._n_lda = n_components_lda
         self._sed_threshold = sed_threshold
+        self._svm_nu = svm_nu
 
         self._pca: PCA | None = None
         self._lda: LDA | None = None
         self._label_encoder: LabelEncoder | None = None
+        self._svm: OneClassSVM | None = None
 
         # Stored training projections for NN matching
         self._train_projected: np.ndarray | None = None
@@ -97,6 +101,10 @@ class PCALDARecognizer:
         self._lda = LDA(n_components=n_lda)
         X_lda = self._lda.fit_transform(X_pca, y_encoded)
 
+        # Train One-Class SVM for Open-Set Rejection (Anomaly Detection)
+        self._svm = OneClassSVM(nu=self._svm_nu, kernel='rbf', gamma='scale')
+        self._svm.fit(X_lda)
+
         # Store training projections
         self._train_projected = X_lda
         self._train_labels = y_encoded
@@ -133,7 +141,7 @@ class PCALDARecognizer:
         return lda_vec.flatten()
 
     def predict(self, face_vector: np.ndarray) -> tuple[str, float]:
-        """Predict identity using Cosine nearest-neighbour matching.
+        """Predict identity using Sklearn One-Class SVM envelope and Cosine angle.
 
         Parameters
         ----------
@@ -143,7 +151,7 @@ class PCALDARecognizer:
         Returns
         -------
         tuple[str, float]
-            ``(predicted_name, cosine_dist)`` — ``"Unknown"`` if dist > threshold.
+            ``(predicted_name, min_cos_dist)`` — ``"Unknown"`` if limits broken.
         """
         from scipy.spatial.distance import cosine
         
@@ -152,24 +160,32 @@ class PCALDARecognizer:
 
         test_proj = self.project(face_vector)
 
-        min_dist = float("inf")
+        # 1. Anomaly Check (Does it belong to the manifold?)
+        is_inlier = self._svm.predict([test_proj.flatten()])[0]  # type: ignore[union-attr]
+        if is_inlier == -1:
+            return ("Unknown", float("inf"))
+
+        # 2. Identify the Inlier via Cosine Nearest-Neighbor
+        min_cos_dist = float("inf")
         best_idx = -1
 
         for i, train_vec in enumerate(self._train_projected):  # type: ignore[union-attr]
-            # Handle empty or zero vectors
             if np.linalg.norm(test_proj) == 0 or np.linalg.norm(train_vec) == 0:
                 continue
             
-            dist = float(cosine(test_proj.flatten(), train_vec.flatten()))
-            if dist < min_dist:
-                min_dist = dist
+            t_flat = test_proj.flatten()
+            v_flat = train_vec.flatten()
+            cos_dist = float(cosine(t_flat, v_flat))
+            
+            if cos_dist < min_cos_dist:
+                min_cos_dist = cos_dist
                 best_idx = self._train_labels[i]  # type: ignore[index]
 
-        if min_dist < self._sed_threshold:
-            name = self._label_encoder.inverse_transform([best_idx])[0]  # type: ignore[union-attr]
-            return (str(name), min_dist)
-        else:
-            return ("Unknown", min_dist)
+        if min_cos_dist > self._sed_threshold:
+            return ("Unknown", min_cos_dist)
+
+        name = self._label_encoder.inverse_transform([best_idx])[0]  # type: ignore[union-attr]
+        return (str(name), min_cos_dist)
 
     def evaluate(self, X_test: np.ndarray, y_test: np.ndarray) -> dict[str, Any]:
         """Evaluate on a test set.

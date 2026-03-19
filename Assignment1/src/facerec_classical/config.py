@@ -33,6 +33,7 @@ class Config:
 
     # --- Recognition    # Thresholds
     sed_threshold: float = 0.45
+    svm_nu: float = 0.05
 
     def __post_init__(self) -> None:
         if self.data_dir is None:

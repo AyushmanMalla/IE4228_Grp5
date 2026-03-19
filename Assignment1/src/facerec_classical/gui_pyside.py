@@ -119,6 +119,8 @@ class CameraThread(QThread):
             
         cap.release()
 
+
+
     def stop(self) -> None:
         self._is_running = False
         self.wait()
@@ -282,6 +284,8 @@ class ClassicalMLWorkerThread(QThread):
         self.sed_threshold = threshold
         if hasattr(self, 'pipeline'):
             self.pipeline._recognizer._sed_threshold = threshold
+
+
 
     def stop(self) -> None:
         self._is_running = False
@@ -497,6 +501,8 @@ class MainWindow(QMainWindow):
         row_sl.addWidget(self.slider)
         row_sl.addWidget(self.slider_lbl)
         l_ctrl.addLayout(row_sl)
+        
+
         sidebar.addWidget(p_ctrl)
         
         # Live Stats Panel
