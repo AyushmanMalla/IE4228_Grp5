@@ -116,24 +116,20 @@ class PCALDARecognizer:
         }
 
     def project(self, face_vector: np.ndarray) -> np.ndarray:
-        """Project a flattened face vector into PCA→LDA space.
+        """Project the face vector into the LDA subspace.
 
-        Parameters
-        ----------
-        face_vector : np.ndarray
-            Shape ``(n_features,)`` or ``(1, n_features)``.
+        1. Applies standard scalable `PCA.transform()`
+        2. Applies Fisher `LinearDiscriminantAnalysis.transform()`
 
         Returns
         -------
         np.ndarray
-            Projected vector in LDA space.
+            Flattened 1D array of extracted features.
         """
         if not self.is_fitted:
             raise RuntimeError("Model not fitted. Call fit() first.")
-
-        vec = face_vector.reshape(1, -1)
-        pca_vec = self._pca.transform(vec)  # type: ignore[union-attr]
-        lda_vec = self._lda.transform(pca_vec)  # type: ignore[union-attr]
+        pca_vec = self._pca.transform([face_vector.flatten()])
+        lda_vec = self._lda.transform(pca_vec)
         return lda_vec.flatten()
 
     def predict(self, face_vector: np.ndarray) -> tuple[str, float]:

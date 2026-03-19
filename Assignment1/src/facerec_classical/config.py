@@ -31,8 +31,8 @@ class Config:
     # --- LDA ---
     n_components_lda: str | int = "auto"  # "auto" = min(n_classes-1, pca_dims)
 
-    # --- Recognition ---
-    sed_threshold: float = 50.0
+    # --- Recognition    # Thresholds
+    sed_threshold: float = 0.45
 
     def __post_init__(self) -> None:
         if self.data_dir is None:

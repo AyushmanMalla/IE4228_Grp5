@@ -12,7 +12,7 @@ import numpy as np
 
 from facerec_classical.config import Config
 from facerec_classical.database import FaceDatabase
-from facerec_classical.detector import HaarFaceDetector
+from facerec_classical.detector import DlibHOGFaceDetector, FaceAligner
 from facerec_classical.preprocessor import preprocess_face
 from facerec_classical.recognizer import PCALDARecognizer
 
@@ -37,9 +37,8 @@ class ClassicalFaceRecPipeline:
 
     def __init__(self, config: Config | None = None) -> None:
         self._config = config or Config()
-        self._detector = HaarFaceDetector(
-            cascade_path=self._config.cascade_path,
-        )
+        self._detector = DlibHOGFaceDetector()
+        self._aligner = FaceAligner()
         self._recognizer = PCALDARecognizer(
             n_components_pca=self._config.n_components_pca,
             n_components_lda=self._config.n_components_lda,
@@ -67,6 +66,10 @@ class ClassicalFaceRecPipeline:
         def _detect_and_preprocess(image_path: str) -> np.ndarray | None:
             """Load, detect face, preprocess."""
             import cv2
+            from facerec_classical.detector import FaceAligner
+
+            if not hasattr(self, "_aligner"):
+                self._aligner = FaceAligner()
 
             img = cv2.imread(image_path)
             if img is None:
@@ -78,8 +81,10 @@ class ClassicalFaceRecPipeline:
             if detections:
                 x, y, w, h = detections[0].bbox
                 face_crop = gray[y : y + h, x : x + w]
+                face_crop = self._aligner.align(face_crop)
             else:
                 face_crop = gray  # fallback: use whole image
+                face_crop = self._aligner.align(face_crop)
 
             return preprocess_face(face_crop, target_size=self._config.target_size)
 
@@ -118,7 +123,7 @@ class ClassicalFaceRecPipeline:
             ]
             # Actually we need a proper Detection
             from facerec_classical.detector import Detection
-            detections = [Detection(bbox=(0, 0, w, h), area=w * h)]
+            detections = [Detection(bbox=(0, 0, w, h), area=w * h, confidence=1.0)]
 
         results: list[RecognitionResult] = []
 

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from facerec_classical.config import Config
+from facerec_classical.detector import FaceAligner
 from facerec_classical.pipeline import ClassicalFaceRecPipeline
 from facerec_classical.preprocessor import preprocess_face
 
@@ -143,10 +144,10 @@ class ClassicalMLWorkerThread(QThread):
         self._latest_frame = frame
 
     def run(self) -> None:
-        # Load and train heavy models inside the thread to prevent UI lockup
         config = Config()
         config.sed_threshold = self.sed_threshold
         self.pipeline = ClassicalFaceRecPipeline(config)
+        self.aligner = FaceAligner()
         
         try:
             print(f"Training PCA/LDA on {self.gallery_dir}...")
@@ -244,7 +245,8 @@ class ClassicalMLWorkerThread(QThread):
                     face_crop = gray[y1:y2, x1:x2]
                     
                     if face_crop.size > 0 and self.pipeline._recognizer.is_fitted:
-                        face_pre = preprocess_face(face_crop, target_size=config.target_size)
+                        face_aligned = self.aligner.align(face_crop)
+                        face_pre = preprocess_face(face_aligned, target_size=config.target_size)
                         face_vector = face_pre.flatten()
                         name, dist = self.pipeline._recognizer.predict(face_vector)
                         
@@ -278,8 +280,8 @@ class ClassicalMLWorkerThread(QThread):
     @Slot(float)
     def update_threshold(self, threshold: float) -> None:
         self.sed_threshold = threshold
-        # Update natively in the pipeline
-        self.pipeline._recognizer.sed_threshold = threshold
+        if hasattr(self, 'pipeline'):
+            self.pipeline._recognizer._sed_threshold = threshold
 
     def stop(self) -> None:
         self._is_running = False
