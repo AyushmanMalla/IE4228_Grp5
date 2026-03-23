@@ -1,8 +1,8 @@
 """PCA + LDA face recognizer with SED matching and metrics.
 
 Implements the Eigenfaces (PCA) → Fisherfaces (LDA) pipeline with
-Squared Euclidean Distance to class centroids, plus ambiguity-based
-open-set rejection for unknown faces.
+Squared Euclidean Distance nearest-neighbour classification and
+training/testing metric reporting.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from sklearn.preprocessing import LabelEncoder
+from sklearn.svm import OneClassSVM
 
 
 class PCALDARecognizer:
@@ -34,23 +35,21 @@ class PCALDARecognizer:
         n_components_pca: int = 50,
         n_components_lda: str | int = "auto",
         sed_threshold: float = 0.45,
-        **kwargs: Any,
+        svm_nu: float = 0.05,
     ) -> None:
         self._n_pca = n_components_pca
         self._n_lda = n_components_lda
         self._sed_threshold = sed_threshold
+        self._svm_nu = svm_nu
 
         self._pca: PCA | None = None
         self._lda: LDA | None = None
         self._label_encoder: LabelEncoder | None = None
+        self._svm: OneClassSVM | None = None
 
         # Stored training projections for NN matching
         self._train_projected: np.ndarray | None = None
         self._train_labels: np.ndarray | None = None
-
-        # Per-class centroids in LDA space for ambiguity rejection
-        self._class_centroids: dict[int, np.ndarray] = {}
-        self._class_max_dist: dict[int, float] = {}
 
     @property
     def is_fitted(self) -> bool:
@@ -102,22 +101,13 @@ class PCALDARecognizer:
         self._lda = LDA(n_components=n_lda)
         X_lda = self._lda.fit_transform(X_pca, y_encoded)
 
+        # Train One-Class SVM for Open-Set Rejection (Anomaly Detection)
+        self._svm = OneClassSVM(nu=self._svm_nu, kernel='rbf', gamma='scale')
+        self._svm.fit(X_lda)
 
         # Store training projections
         self._train_projected = X_lda
         self._train_labels = y_encoded
-
-        # Compute per-class centroids and max within-class distances
-        self._class_centroids = {}
-        self._class_max_dist = {}
-        for cls in np.unique(y_encoded):
-            mask = y_encoded == cls
-            class_vecs = X_lda[mask]
-            centroid = np.mean(class_vecs, axis=0)
-            self._class_centroids[int(cls)] = centroid
-            # Max Euclidean distance of any training sample to its centroid
-            dists = np.linalg.norm(class_vecs - centroid, axis=1)
-            self._class_max_dist[int(cls)] = float(np.max(dists))
 
         # Training accuracy (NN on training set)
         train_accuracy = self._compute_nn_accuracy(X_lda, y_encoded)
@@ -163,40 +153,39 @@ class PCALDARecognizer:
         tuple[str, float]
             ``(predicted_name, min_cos_dist)`` — ``"Unknown"`` if limits broken.
         """
+        from scipy.spatial.distance import cosine
+        
         if not self.is_fitted:
             raise RuntimeError("Model not fitted. Call fit() first.")
 
         test_proj = self.project(face_vector)
 
-        # 1. Compute Euclidean distance to each class centroid
-        centroid_dists: list[tuple[int, float]] = []
-        for cls, centroid in self._class_centroids.items():
-            dist = float(np.linalg.norm(test_proj - centroid))
-            centroid_dists.append((cls, dist))
+        # 1. Anomaly Check (Does it belong to the manifold?)
+        is_inlier = self._svm.predict([test_proj.flatten()])[0]  # type: ignore[union-attr]
+        if is_inlier == -1:
+            return ("Unknown", float("inf"))
 
-        # Sort by distance (closest first)
-        centroid_dists.sort(key=lambda x: x[1])
-        best_cls, best_dist = centroid_dists[0]
-        second_cls, second_dist = centroid_dists[1] if len(centroid_dists) > 1 else (best_cls, best_dist)
+        # 2. Identify the Inlier via Cosine Nearest-Neighbor
+        min_cos_dist = float("inf")
+        best_idx = -1
 
-        best_name = self._label_encoder.inverse_transform([best_cls])[0]  # type: ignore[union-attr]
+        for i, train_vec in enumerate(self._train_projected):  # type: ignore[union-attr]
+            if np.linalg.norm(test_proj) == 0 or np.linalg.norm(train_vec) == 0:
+                continue
+            
+            t_flat = test_proj.flatten()
+            v_flat = train_vec.flatten()
+            cos_dist = float(cosine(t_flat, v_flat))
+            
+            if cos_dist < min_cos_dist:
+                min_cos_dist = cos_dist
+                best_idx = self._train_labels[i]  # type: ignore[index]
 
-        # 2. Ambiguity check: is the face clearly closer to one class?
-        #    ratio > 1.5 means best class is meaningfully closer than second
-        ambiguity_ratio = second_dist / best_dist if best_dist > 1e-9 else 1.0
+        if min_cos_dist > self._sed_threshold:
+            return ("Unknown", min_cos_dist)
 
-        # 3. Within-class check: is the face within the known radius of the class?
-        max_radius = self._class_max_dist.get(best_cls, 0.0)
-        radius_ratio = best_dist / max_radius if max_radius > 1e-9 else float('inf')
-
-        # Reject if: face is outside the known class radius OR no clear winner
-        if radius_ratio > 1.1 or ambiguity_ratio < 1.5:
-            reason = "radius" if radius_ratio > 1.1 else "ambiguity"
-            print(f"  [UNKNOWN] nearest={best_name} r={radius_ratio:.2f} a={ambiguity_ratio:.2f} ({reason})")
-            return ("Unknown", best_dist)
-
-        print(f"  [MATCH ✓] {best_name} r={radius_ratio:.2f} a={ambiguity_ratio:.2f}")
-        return (str(best_name), best_dist)
+        name = self._label_encoder.inverse_transform([best_idx])[0]  # type: ignore[union-attr]
+        return (str(name), min_cos_dist)
 
     def evaluate(self, X_test: np.ndarray, y_test: np.ndarray) -> dict[str, Any]:
         """Evaluate on a test set.

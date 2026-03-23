@@ -594,29 +594,6 @@ class MainWindow(QMainWindow):
             self.gallery_container.addWidget(lbl)
 
     def closeEvent(self, event) -> None:
-        self.ml_thread.stop()
         self.camera_thread.stop()
-        # Give threads a moment to finish before Qt tears down
-        self.ml_thread.wait(3000)
-        self.camera_thread.wait(3000)
-        event.accept()
-
-
-if __name__ == "__main__":
-    import sys
-
-    parser = argparse.ArgumentParser(description="Classical Face Recognition GUI")
-    parser.add_argument(
-        "--gallery", type=str, default=None,
-        help="Path to gallery directory (folder-per-person)",
-    )
-    parser.add_argument("--camera", type=int, default=0, help="Camera index")
-    args = parser.parse_args()
-
-    config = Config()
-    gallery = Path(args.gallery) if args.gallery else config.gallery_dir
-
-    app = QApplication(sys.argv)
-    window = MainWindow(gallery_dir=gallery, camera_index=args.camera)
-    window.show()
-    sys.exit(app.exec())
+        self.ml_thread.stop()
+        super().closeEvent(event)
