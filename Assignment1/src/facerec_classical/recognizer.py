@@ -3,7 +3,7 @@
 Implements the Eigenfaces (PCA) → Fisherfaces (LDA) pipeline with
 a cascaded rejection strategy:
   Stage 1: PCA reconstruction error filters non-gallery faces.
-  Stage 2: Per-class Mahalanobis distance in LDA space for identity
+  Stage 2: Multi-class SVM probability in LDA space for identity
            resolution and final unknown rejection.
 """
 
@@ -12,10 +12,10 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from sklearn.covariance import LedoitWolf
 from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from sklearn.preprocessing import LabelEncoder
+from sklearn.svm import SVC
 
 
 class PCALDARecognizer:
@@ -30,8 +30,8 @@ class PCALDARecognizer:
         Number of LDA components. ``"auto"`` = ``min(n_classes - 1, n_pca_dims)``.
     reconstruction_threshold : float
         Maximum PCA reconstruction MSE for Stage 1 acceptance.
-    mahalanobis_threshold : float
-        Maximum Mahalanobis distance for Stage 2 acceptance.
+    svm_prob_threshold : float
+        Minimum multi-class SVM probability for Stage 2 acceptance.
     sed_threshold : float
         Legacy threshold, kept for backwards compatibility.
     """
@@ -41,22 +41,19 @@ class PCALDARecognizer:
         n_components_pca: int = 50,
         n_components_lda: str | int = "auto",
         reconstruction_threshold: float = 5000.0,
-        mahalanobis_threshold: float = 25.0,
+        svm_prob_threshold: float = 0.60,
         sed_threshold: float = 0.45,
     ) -> None:
         self._n_pca = n_components_pca
         self._n_lda = n_components_lda
         self._recon_threshold = reconstruction_threshold
-        self._mahal_threshold = mahalanobis_threshold
+        self._svm_prob_threshold = svm_prob_threshold
         self._sed_threshold = sed_threshold  # legacy
 
         self._pca: PCA | None = None
         self._lda: LDA | None = None
         self._label_encoder: LabelEncoder | None = None
-
-        # Two-stage triage state
-        self._class_means: dict[int, np.ndarray] | None = None
-        self._pooled_precision: np.ndarray | None = None
+        self._svm: SVC | None = None
 
         # Stored training projections for NN matching fallback
         self._train_projected: np.ndarray | None = None
@@ -65,7 +62,7 @@ class PCALDARecognizer:
     @property
     def is_fitted(self) -> bool:
         """Return True if the model has been trained."""
-        return self._pca is not None and self._lda is not None
+        return self._pca is not None and self._lda is not None and self._svm is not None
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> dict[str, Any]:
         """Train PCA → LDA pipeline with two-stage triage.
@@ -114,20 +111,9 @@ class PCALDARecognizer:
         self._lda = LDA(n_components=n_lda)
         X_lda = self._lda.fit_transform(X_pca, y_encoded)
 
-        # --- Two-Stage Triage: compute per-class stats in LDA space ---
-        self._class_means = {}
-        for label in np.unique(y_encoded):
-            mask = y_encoded == label
-            self._class_means[int(label)] = X_lda[mask].mean(axis=0)
-
-        # Pooled within-class covariance with Ledoit-Wolf shrinkage
-        centered = np.vstack([
-            X_lda[y_encoded == label] - self._class_means[int(label)]
-            for label in np.unique(y_encoded)
-        ])
-        lw = LedoitWolf()
-        lw.fit(centered)
-        self._pooled_precision = lw.precision_  # Inverse covariance matrix
+        # --- Two-Stage Triage: Multi-class SVM with probability ---
+        self._svm = SVC(kernel='rbf', probability=True, class_weight='balanced', random_state=42)
+        self._svm.fit(X_lda, y_encoded)
 
         # Store training projections
         self._train_projected = X_lda
@@ -191,7 +177,7 @@ class PCALDARecognizer:
         """Two-stage triage prediction.
 
         Stage 1: PCA reconstruction error → reject if above threshold.
-        Stage 2: Per-class Mahalanobis in LDA space → identity or reject.
+        Stage 2: Multi-class SVM probability in LDA space → identity or reject.
 
         Parameters
         ----------
@@ -201,7 +187,7 @@ class PCALDARecognizer:
         Returns
         -------
         tuple[str, float]
-            ``(predicted_name, distance)`` — ``"Unknown"`` if rejected.
+            ``(predicted_name, probability)`` — ``"Unknown"`` if rejected.
         """
         if not self.is_fitted:
             raise RuntimeError("Model not fitted. Call fit() first.")
@@ -209,28 +195,21 @@ class PCALDARecognizer:
         # --- Stage 1: PCA Reconstruction Error ---
         recon_err = self.reconstruction_error(face_vector)
         if recon_err > self._recon_threshold:
-            return ("Unknown", float("inf"))
+            return ("Unknown", 0.0)
 
-        # --- Stage 2: Per-class Mahalanobis in LDA Space ---
+        # --- Stage 2: Multi-class SVM Probability ---
         lda_vec = self.project(face_vector)
+        
+        # Get probability distributions
+        probs = self._svm.predict_proba([lda_vec])[0]  # type: ignore[union-attr]
+        max_prob = float(np.max(probs))
+        
+        if max_prob < self._svm_prob_threshold:
+            return ("Unknown", max_prob)
 
-        min_dist = float("inf")
-        best_label = -1
-
-        for label, mean in self._class_means.items():  # type: ignore[union-attr]
-            diff = lda_vec - mean
-            mahal_dist = float(
-                np.sqrt(np.abs(diff @ self._pooled_precision @ diff))  # type: ignore[union-attr]
-            )
-            if mahal_dist < min_dist:
-                min_dist = mahal_dist
-                best_label = label
-
-        if min_dist > self._mahal_threshold:
-            return ("Unknown", min_dist)
-
+        best_label = self._svm.classes_[np.argmax(probs)]  # type: ignore[union-attr]
         name = self._label_encoder.inverse_transform([best_label])[0]  # type: ignore[union-attr]
-        return (str(name), min_dist)
+        return (str(name), max_prob)
 
     def evaluate(self, X_test: np.ndarray, y_test: np.ndarray) -> dict[str, Any]:
         """Evaluate on a test set.

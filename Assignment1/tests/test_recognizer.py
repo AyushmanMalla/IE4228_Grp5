@@ -121,45 +121,48 @@ class TestProject:
             rec.project(np.zeros(100))
 
 
-class TestPredict:
-    """Tests for two-stage triage predict() method."""
+class TestSVMPredict:
+    """Tests for multi-class SVM probability prediction (Stage 2)."""
 
     def test_predict_training_sample_returns_correct_label(self):
         from facerec_classical.recognizer import PCALDARecognizer
         rec = PCALDARecognizer(
             n_components_pca=10,
             reconstruction_threshold=1e8,
-            mahalanobis_threshold=100.0,
+            svm_prob_threshold=0.0,
         )
         X, y = _make_training_data()
         rec.fit(X, y)
 
-        name, dist = rec.predict(X[0])
+        name, prob = rec.predict(X[0])
         assert name == y[0]
-        assert dist >= 0
+        assert 0.0 <= prob <= 1.0
 
-    def test_predict_returns_unknown_for_far_vector(self):
+    def test_predict_returns_unknown_for_low_probability(self):
         from facerec_classical.recognizer import PCALDARecognizer
         rec = PCALDARecognizer(
             n_components_pca=10,
             reconstruction_threshold=1e8,
-            mahalanobis_threshold=5.0,
+            svm_prob_threshold=1.0,  # Impossible threshold
         )
         X, y = _make_training_data()
         rec.fit(X, y)
 
         rng = np.random.RandomState(99)
-        far_vec = rng.randn(100) * 1000
-        name, dist = rec.predict(far_vec)
+        # Create a vector exactly between two clusters to lower confidence
+        ambiguous_vec = (X[0] + X[-1]) / 2.0
+        name, prob = rec.predict(ambiguous_vec)
         assert name == "Unknown"
+        assert prob < 1.0
 
-    def test_no_svm_used(self):
-        """Verify OneClassSVM is no longer part of the recognizer."""
+    def test_svm_is_used(self):
+        """Verify SVC is fitted and available."""
         from facerec_classical.recognizer import PCALDARecognizer
         rec = PCALDARecognizer(n_components_pca=10)
         X, y = _make_training_data()
         rec.fit(X, y)
-        assert not hasattr(rec, '_svm') or rec._svm is None
+        assert hasattr(rec, '_svm')
+        assert rec._svm is not None
 
 
 class TestEvaluate:
@@ -170,7 +173,7 @@ class TestEvaluate:
         rec = PCALDARecognizer(
             n_components_pca=10,
             reconstruction_threshold=1e8,
-            mahalanobis_threshold=100.0,
+            svm_prob_threshold=0.0,
         )
         X, y = _make_training_data()
         rec.fit(X, y)
@@ -186,7 +189,7 @@ class TestEvaluate:
         rec = PCALDARecognizer(
             n_components_pca=10,
             reconstruction_threshold=1e8,
-            mahalanobis_threshold=100.0,
+            svm_prob_threshold=0.0,
         )
         X, y = _make_training_data()
         rec.fit(X, y)

@@ -33,7 +33,7 @@ class Config:
 
     # --- Recognition Thresholds (Two-Stage Triage) ---
     reconstruction_threshold: float = 5000.0   # PCA reconstruction MSE cutoff
-    mahalanobis_threshold: float = 25.0        # Per-class Mahalanobis distance cutoff
+    svm_prob_threshold: float = 0.60           # Minimum SVM probability for match
     sed_threshold: float = 0.45                # Legacy, kept for backwards compat
 
     def __post_init__(self) -> None:
@@ -53,6 +53,6 @@ class Config:
         return cls(
             n_components_pca=10,
             reconstruction_threshold=1e8,
-            mahalanobis_threshold=100.0,
+            svm_prob_threshold=0.0,
             sed_threshold=100.0,
         )

@@ -43,7 +43,7 @@ class ClassicalFaceRecPipeline:
             n_components_pca=self._config.n_components_pca,
             n_components_lda=self._config.n_components_lda,
             reconstruction_threshold=self._config.reconstruction_threshold,
-            mahalanobis_threshold=self._config.mahalanobis_threshold,
+            svm_prob_threshold=self._config.svm_prob_threshold,
         )
 
     def train(self, dataset_path: str | None = None) -> dict[str, Any]:

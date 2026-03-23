@@ -281,9 +281,9 @@ class ClassicalMLWorkerThread(QThread):
 
     @Slot(float)
     def update_threshold(self, threshold: float) -> None:
-        """Update Mahalanobis distance threshold."""
+        """Update SVM Probability threshold."""
         if hasattr(self, 'pipeline'):
-            self.pipeline._recognizer._mahal_threshold = threshold
+            self.pipeline._recognizer._svm_prob_threshold = threshold
 
     @Slot(float)
     def update_recon_threshold(self, threshold: float) -> None:
@@ -453,7 +453,7 @@ class MainWindow(QMainWindow):
         self.ml_thread.gallery_loaded.connect(self._update_gallery_list)
         
         # Sliders mapped to two-stage triage thresholds
-        self.slider.valueChanged.connect(lambda v: self.ml_thread.update_threshold(float(v)))
+        self.slider.valueChanged.connect(lambda v: self.ml_thread.update_threshold(float(v) / 100.0))
         self.recon_slider.valueChanged.connect(lambda v: self.ml_thread.update_recon_threshold(float(v)))
         
         self.ml_thread.start()
@@ -509,19 +509,19 @@ class MainWindow(QMainWindow):
         row_recon.addWidget(self.recon_slider_lbl)
         l_ctrl.addLayout(row_recon)
         
-        lbl_mahal = QLabel("Mahalanobis Threshold:")
+        lbl_mahal = QLabel("SVM Prob Threshold:")
         lbl_mahal.setStyleSheet(f"font-family: {Theme.FONT_BODY}; color: {Theme.TEXT_PRIMARY};")
         l_ctrl.addWidget(lbl_mahal)
         
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setMinimum(1)
         self.slider.setMaximum(100)
-        self.slider.setValue(25)
-        self.slider_lbl = QLabel("25.0")
+        self.slider.setValue(60)
+        self.slider_lbl = QLabel("0.60")
         self.slider_lbl.setMinimumWidth(35)
         self.slider_lbl.setStyleSheet(f"font-family: {Theme.FONT_MONO}; color: {Theme.ACCENT_BLUE};")
         
-        self.slider.valueChanged.connect(lambda v: self.slider_lbl.setText(f"{v:.1f}"))
+        self.slider.valueChanged.connect(lambda v: self.slider_lbl.setText(f"{v / 100.0:.2f}"))
         
         row_sl = QHBoxLayout()
         row_sl.addWidget(self.slider)
