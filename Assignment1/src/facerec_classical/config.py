@@ -31,9 +31,10 @@ class Config:
     # --- LDA ---
     n_components_lda: str | int = "auto"  # "auto" = min(n_classes-1, pca_dims)
 
-    # --- Recognition    # Thresholds
-    sed_threshold: float = 0.45
-    svm_nu: float = 0.05
+    # --- Recognition Thresholds (Two-Stage Triage) ---
+    reconstruction_threshold: float = 5000.0   # PCA reconstruction MSE cutoff
+    mahalanobis_threshold: float = 25.0        # Per-class Mahalanobis distance cutoff
+    sed_threshold: float = 0.45                # Legacy, kept for backwards compat
 
     def __post_init__(self) -> None:
         if self.data_dir is None:
@@ -51,5 +52,7 @@ class Config:
         """Lightweight config for unit tests."""
         return cls(
             n_components_pca=10,
+            reconstruction_threshold=1e8,
+            mahalanobis_threshold=100.0,
             sed_threshold=100.0,
         )

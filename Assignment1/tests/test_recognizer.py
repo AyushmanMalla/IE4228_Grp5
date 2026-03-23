@@ -1,4 +1,4 @@
-"""TDD tests for the PCA+LDA recognizer."""
+"""TDD tests for the PCA+LDA recognizer with two-stage triage."""
 
 from __future__ import annotations
 
@@ -77,6 +77,29 @@ class TestFit:
         assert metrics["reconstruction_error"] >= 0
 
 
+class TestReconstructionError:
+    """Tests for PCA reconstruction error filtering (Stage 1)."""
+
+    def test_reconstruction_error_low_for_training_sample(self):
+        from facerec_classical.recognizer import PCALDARecognizer
+        rec = PCALDARecognizer(n_components_pca=10, reconstruction_threshold=1e8)
+        X, y = _make_training_data()
+        rec.fit(X, y)
+        error = rec.reconstruction_error(X[0])
+        assert error >= 0
+        assert error < rec._recon_threshold
+
+    def test_reconstruction_error_high_for_random_noise(self):
+        from facerec_classical.recognizer import PCALDARecognizer
+        rec = PCALDARecognizer(n_components_pca=10, reconstruction_threshold=100.0)
+        X, y = _make_training_data()
+        rec.fit(X, y)
+        rng = np.random.RandomState(99)
+        noise = rng.randn(100) * 10000
+        error = rec.reconstruction_error(noise)
+        assert error > 100.0
+
+
 class TestProject:
     """Tests for project() method."""
 
@@ -99,11 +122,15 @@ class TestProject:
 
 
 class TestPredict:
-    """Tests for predict() method."""
+    """Tests for two-stage triage predict() method."""
 
     def test_predict_training_sample_returns_correct_label(self):
         from facerec_classical.recognizer import PCALDARecognizer
-        rec = PCALDARecognizer(n_components_pca=10, sed_threshold=1.0)
+        rec = PCALDARecognizer(
+            n_components_pca=10,
+            reconstruction_threshold=1e8,
+            mahalanobis_threshold=100.0,
+        )
         X, y = _make_training_data()
         rec.fit(X, y)
 
@@ -113,15 +140,26 @@ class TestPredict:
 
     def test_predict_returns_unknown_for_far_vector(self):
         from facerec_classical.recognizer import PCALDARecognizer
-        rec = PCALDARecognizer(n_components_pca=10, sed_threshold=0.001)
+        rec = PCALDARecognizer(
+            n_components_pca=10,
+            reconstruction_threshold=1e8,
+            mahalanobis_threshold=5.0,
+        )
         X, y = _make_training_data()
         rec.fit(X, y)
 
-        # Random vector far from any cluster
         rng = np.random.RandomState(99)
         far_vec = rng.randn(100) * 1000
         name, dist = rec.predict(far_vec)
         assert name == "Unknown"
+
+    def test_no_svm_used(self):
+        """Verify OneClassSVM is no longer part of the recognizer."""
+        from facerec_classical.recognizer import PCALDARecognizer
+        rec = PCALDARecognizer(n_components_pca=10)
+        X, y = _make_training_data()
+        rec.fit(X, y)
+        assert not hasattr(rec, '_svm') or rec._svm is None
 
 
 class TestEvaluate:
@@ -129,7 +167,11 @@ class TestEvaluate:
 
     def test_evaluate_returns_accuracy_dict(self):
         from facerec_classical.recognizer import PCALDARecognizer
-        rec = PCALDARecognizer(n_components_pca=10, sed_threshold=1.0)
+        rec = PCALDARecognizer(
+            n_components_pca=10,
+            reconstruction_threshold=1e8,
+            mahalanobis_threshold=100.0,
+        )
         X, y = _make_training_data()
         rec.fit(X, y)
 
@@ -141,7 +183,11 @@ class TestEvaluate:
 
     def test_evaluate_train_accuracy_is_high(self):
         from facerec_classical.recognizer import PCALDARecognizer
-        rec = PCALDARecognizer(n_components_pca=10, sed_threshold=1.0)
+        rec = PCALDARecognizer(
+            n_components_pca=10,
+            reconstruction_threshold=1e8,
+            mahalanobis_threshold=100.0,
+        )
         X, y = _make_training_data()
         rec.fit(X, y)
 

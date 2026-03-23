@@ -42,7 +42,8 @@ class ClassicalFaceRecPipeline:
         self._recognizer = PCALDARecognizer(
             n_components_pca=self._config.n_components_pca,
             n_components_lda=self._config.n_components_lda,
-            sed_threshold=self._config.sed_threshold,
+            reconstruction_threshold=self._config.reconstruction_threshold,
+            mahalanobis_threshold=self._config.mahalanobis_threshold,
         )
 
     def train(self, dataset_path: str | None = None) -> dict[str, Any]:
@@ -81,10 +82,10 @@ class ClassicalFaceRecPipeline:
             if detections:
                 x, y, w, h = detections[0].bbox
                 face_crop = gray[y : y + h, x : x + w]
-                face_crop = self._aligner.align(face_crop)
+                face_crop = self._aligner.align(face_crop, target_size=self._config.target_size)
             else:
                 face_crop = gray  # fallback: use whole image
-                face_crop = self._aligner.align(face_crop)
+                face_crop = self._aligner.align(face_crop, target_size=self._config.target_size)
 
             return preprocess_face(face_crop, target_size=self._config.target_size)
 

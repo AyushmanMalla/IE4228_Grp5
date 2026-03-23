@@ -158,58 +158,128 @@ class HaarFaceDetector(FaceDetector):
 
 
 class FaceAligner:
-    """Uses Haar Cascades to detect eyes and align the face crop via affine rotation.
-    
-    This fulfills Strategy A: Geometry-based in-plane rotation to stabilize
-    HOG and LBP descriptors.
+    """Align faces using dlib's 68-point landmark predictor.
+
+    Computes a similarity transform (rotation + scale + translation)
+    to pin eye centers to fixed target coordinates on a normalized crop.
+    Falls back to simple resize if landmarks can't be detected.
     """
-    def __init__(self, eye_cascade_path: str = "") -> None:
-        import cv2
-        if not eye_cascade_path:
-            eye_cascade_path = str(cv2.data.haarcascades + "haarcascade_eye.xml")
-        
-        self._cascade = cv2.CascadeClassifier(eye_cascade_path)
-        if self._cascade.empty():
-            print(f"Warning: Failed to load eye cascade: {eye_cascade_path}")
-            
-    def align(self, face_crop: np.ndarray) -> np.ndarray:
-        import cv2
-        import numpy as np
-        
-        if self._cascade.empty() or face_crop.size == 0:
-            return face_crop
-            
+
+    # Target eye positions on a 100x100 crop
+    LEFT_EYE_TARGET = (30, 35)
+    RIGHT_EYE_TARGET = (70, 35)
+
+    def __init__(self, predictor_path: str = "") -> None:
+        from pathlib import Path
+
+        if not predictor_path:
+            # Look in data/ directory relative to project root
+            project_root = Path(__file__).resolve().parents[2]
+            predictor_path = str(
+                project_root / "data" / "shape_predictor_68_face_landmarks.dat"
+            )
+
+        self._predictor = None
+        if Path(predictor_path).exists():
+            self._predictor = dlib.shape_predictor(predictor_path)
+        else:
+            print(
+                f"Warning: dlib shape predictor not found at {predictor_path}. "
+                f"Falling back to resize-only alignment."
+            )
+
+    def align(
+        self,
+        face_crop: np.ndarray,
+        target_size: tuple[int, int] = (100, 100),
+    ) -> np.ndarray:
+        """Align a face crop using landmark-based similarity transform.
+
+        Parameters
+        ----------
+        face_crop : np.ndarray
+            Grayscale face crop.
+        target_size : tuple[int, int]
+            ``(width, height)`` of the output.
+
+        Returns
+        -------
+        np.ndarray
+            Aligned face crop of ``target_size``.
+        """
+        if face_crop.size == 0:
+            return np.zeros(target_size[::-1], dtype=np.uint8)
+
         h, w = face_crop.shape[:2]
-        if h < 20 or w < 20: 
-            return face_crop
-            
-        # Eyes are generally in the top 60% of the face crop
-        roi_gray = face_crop[0:int(h * 0.6), 0:w]
-        
-        eyes = self._cascade.detectMultiScale(roi_gray, scaleFactor=1.1, minNeighbors=4)
-        if len(eyes) >= 2:
-            # Sort by area (largest two = most likely eyes)
-            eyes_list = sorted(eyes, key=lambda e: e[2]*e[3], reverse=True)[:2]
-            # Sort strictly left-to-right
-            eyes_list = sorted(eyes_list, key=lambda e: e[0])
-            
-            e1, e2 = eyes_list[0], eyes_list[1]
-            c1 = (e1[0] + e1[2]//2, e1[1] + e1[3]//2)
-            c2 = (e2[0] + e2[2]//2, e2[1] + e2[3]//2)
-            
-            dy = c2[1] - c1[1]
-            dx = c2[0] - c1[0]
-            angle = np.degrees(np.arctan2(dy, dx))
-            
-            # Avoid crazy false positive flips
-            if abs(angle) < 45:
-                center = (w // 2, h // 2)
-                M = cv2.getRotationMatrix2D(center, angle, 1.0)
-                aligned = cv2.warpAffine(
-                    face_crop, M, (w, h), 
-                    flags=cv2.INTER_CUBIC, 
-                    borderMode=cv2.BORDER_REPLICATE
+
+        if self._predictor is not None and h >= 30 and w >= 30:
+            landmarks = self._detect_eye_centers(face_crop)
+            if landmarks is not None:
+                left_eye, right_eye = landmarks
+                return self._similarity_transform(
+                    face_crop, left_eye, right_eye, target_size
                 )
-                return aligned
-                
-        return face_crop
+
+        # Fallback: simple resize
+        return cv2.resize(face_crop, target_size)
+
+    def _detect_eye_centers(
+        self, gray: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """Detect eye centers using dlib 68-point landmarks.
+
+        Returns
+        -------
+        tuple or None
+            ``(left_eye_center, right_eye_center)`` as float arrays,
+            or ``None`` if detection fails.
+        """
+        rect = dlib.rectangle(0, 0, gray.shape[1], gray.shape[0])
+        shape = self._predictor(gray, rect)
+
+        if shape.num_parts < 68:
+            return None
+
+        # Left eye: landmarks 36-41, Right eye: landmarks 42-47
+        left_eye = np.mean(
+            [(shape.part(i).x, shape.part(i).y) for i in range(36, 42)],
+            axis=0,
+        )
+        right_eye = np.mean(
+            [(shape.part(i).x, shape.part(i).y) for i in range(42, 48)],
+            axis=0,
+        )
+
+        return left_eye, right_eye
+
+    def _similarity_transform(
+        self,
+        img: np.ndarray,
+        left_eye: np.ndarray,
+        right_eye: np.ndarray,
+        target_size: tuple[int, int],
+    ) -> np.ndarray:
+        """Apply similarity transform to pin eyes to target coordinates.
+
+        Uses ``cv2.estimateAffinePartial2D`` which constrains to
+        rotation + uniform scale + translation (4 DOF).
+        """
+        src_pts = np.float32([left_eye, right_eye])
+        dst_pts = np.float32([self.LEFT_EYE_TARGET, self.RIGHT_EYE_TARGET])
+
+        M, _ = cv2.estimateAffinePartial2D(
+            src_pts.reshape(-1, 1, 2),
+            dst_pts.reshape(-1, 1, 2),
+        )
+
+        if M is None:
+            return cv2.resize(img, target_size)
+
+        aligned = cv2.warpAffine(
+            img,
+            M,
+            target_size,
+            flags=cv2.INTER_CUBIC,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        return aligned

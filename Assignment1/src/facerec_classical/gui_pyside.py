@@ -247,7 +247,7 @@ class ClassicalMLWorkerThread(QThread):
                     face_crop = gray[y1:y2, x1:x2]
                     
                     if face_crop.size > 0 and self.pipeline._recognizer.is_fitted:
-                        face_aligned = self.aligner.align(face_crop)
+                        face_aligned = self.aligner.align(face_crop, target_size=config.target_size)
                         face_pre = preprocess_face(face_aligned, target_size=config.target_size)
                         face_vector = face_pre.flatten()
                         name, dist = self.pipeline._recognizer.predict(face_vector)
@@ -281,9 +281,15 @@ class ClassicalMLWorkerThread(QThread):
 
     @Slot(float)
     def update_threshold(self, threshold: float) -> None:
-        self.sed_threshold = threshold
+        """Update Mahalanobis distance threshold."""
         if hasattr(self, 'pipeline'):
-            self.pipeline._recognizer._sed_threshold = threshold
+            self.pipeline._recognizer._mahal_threshold = threshold
+
+    @Slot(float)
+    def update_recon_threshold(self, threshold: float) -> None:
+        """Update PCA reconstruction error threshold."""
+        if hasattr(self, 'pipeline'):
+            self.pipeline._recognizer._recon_threshold = threshold
 
 
 
@@ -446,8 +452,9 @@ class MainWindow(QMainWindow):
         self.ml_thread.detections_ready.connect(self._update_stats)
         self.ml_thread.gallery_loaded.connect(self._update_gallery_list)
         
-        # Slider mapped to Cosine Distance Threshold (0.10 -> 1.0)
-        self.slider.valueChanged.connect(lambda v: self.ml_thread.update_threshold(float(v) / 100.0))
+        # Sliders mapped to two-stage triage thresholds
+        self.slider.valueChanged.connect(lambda v: self.ml_thread.update_threshold(float(v)))
+        self.recon_slider.valueChanged.connect(lambda v: self.ml_thread.update_recon_threshold(float(v)))
         
         self.ml_thread.start()
         self.camera_thread.start()
@@ -483,19 +490,38 @@ class MainWindow(QMainWindow):
         l_ctrl.setContentsMargins(16, 16, 16, 16)
         l_ctrl.setSpacing(12)
         
-        lbl_control = QLabel("Cosine Distance:")
-        lbl_control.setStyleSheet(f"font-family: {Theme.FONT_BODY}; color: {Theme.TEXT_PRIMARY};")
-        l_ctrl.addWidget(lbl_control)
+        lbl_recon = QLabel("Recon Error Threshold:")
+        lbl_recon.setStyleSheet(f"font-family: {Theme.FONT_BODY}; color: {Theme.TEXT_PRIMARY};")
+        l_ctrl.addWidget(lbl_recon)
+        
+        self.recon_slider = QSlider(Qt.Orientation.Horizontal)
+        self.recon_slider.setMinimum(100)
+        self.recon_slider.setMaximum(50000)
+        self.recon_slider.setValue(5000)
+        self.recon_slider_lbl = QLabel("5000")
+        self.recon_slider_lbl.setMinimumWidth(45)
+        self.recon_slider_lbl.setStyleSheet(f"font-family: {Theme.FONT_MONO}; color: {Theme.ACCENT_BLUE};")
+        
+        self.recon_slider.valueChanged.connect(lambda v: self.recon_slider_lbl.setText(f"{v}"))
+        
+        row_recon = QHBoxLayout()
+        row_recon.addWidget(self.recon_slider)
+        row_recon.addWidget(self.recon_slider_lbl)
+        l_ctrl.addLayout(row_recon)
+        
+        lbl_mahal = QLabel("Mahalanobis Threshold:")
+        lbl_mahal.setStyleSheet(f"font-family: {Theme.FONT_BODY}; color: {Theme.TEXT_PRIMARY};")
+        l_ctrl.addWidget(lbl_mahal)
         
         self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setMinimum(10)   # 0.10
-        self.slider.setMaximum(100)  # 1.00
-        self.slider.setValue(45)     # default 0.45
-        self.slider_lbl = QLabel("0.45")
+        self.slider.setMinimum(1)
+        self.slider.setMaximum(100)
+        self.slider.setValue(25)
+        self.slider_lbl = QLabel("25.0")
         self.slider_lbl.setMinimumWidth(35)
         self.slider_lbl.setStyleSheet(f"font-family: {Theme.FONT_MONO}; color: {Theme.ACCENT_BLUE};")
         
-        self.slider.valueChanged.connect(lambda v: self.slider_lbl.setText(f"{v / 100.0:.2f}"))
+        self.slider.valueChanged.connect(lambda v: self.slider_lbl.setText(f"{v:.1f}"))
         
         row_sl = QHBoxLayout()
         row_sl.addWidget(self.slider)

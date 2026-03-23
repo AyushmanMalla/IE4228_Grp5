@@ -22,7 +22,7 @@ class TestToGrayscale:
 
 
 class TestEqualizeHistogram:
-    """Tests for equalize_histogram()."""
+    """Tests for equalize_histogram() (legacy, kept for backwards compat)."""
 
     def test_output_shape_matches_input(self, sample_gray_image):
         from facerec_classical.preprocessor import equalize_histogram
@@ -32,12 +32,56 @@ class TestEqualizeHistogram:
 
     def test_changes_pixel_distribution(self):
         from facerec_classical.preprocessor import equalize_histogram
-        # Low-contrast image
         low_contrast = np.full((50, 50), 128, dtype=np.uint8)
         low_contrast[:25, :25] = 130
         eq = equalize_histogram(low_contrast)
-        # After equalisation, the range should be wider
         assert eq.max() > low_contrast.max() or eq.min() < low_contrast.min()
+
+
+class TestCLAHE:
+    """Tests for clahe() replacing equalize_histogram in the pipeline."""
+
+    def test_output_shape_matches_input(self, sample_gray_image):
+        from facerec_classical.preprocessor import clahe
+        result = clahe(sample_gray_image)
+        assert result.shape == sample_gray_image.shape
+        assert result.dtype == np.uint8
+
+    def test_preserves_local_contrast_better_than_global(self):
+        """CLAHE should not wash out a half-shadow face like global eq does."""
+        from facerec_classical.preprocessor import clahe
+        img = np.zeros((100, 100), dtype=np.uint8)
+        img[:, :50] = 40   # dark half
+        img[:, 50:] = 200  # bright half
+        result = clahe(img)
+        left_mean = result[:, :50].mean()
+        right_mean = result[:, 50:].mean()
+        assert left_mean < right_mean  # preserves relative ordering
+
+
+class TestLBPHistogram:
+    """Tests for compute_lbp_histogram()."""
+
+    def test_returns_1d_array(self):
+        from facerec_classical.preprocessor import compute_lbp_histogram
+        img = np.random.randint(0, 256, (100, 100), dtype=np.uint8)
+        result = compute_lbp_histogram(img)
+        assert result.ndim == 1
+
+    def test_output_length_matches_grid(self):
+        from facerec_classical.preprocessor import compute_lbp_histogram
+        img = np.random.randint(0, 256, (100, 100), dtype=np.uint8)
+        # 5x5 grid, P=8 → P+2=10 bins per cell → 5*5*10 = 250
+        result = compute_lbp_histogram(img, grid_x=5, grid_y=5, n_points=8)
+        assert len(result) == 250
+
+    def test_different_images_different_histograms(self):
+        from facerec_classical.preprocessor import compute_lbp_histogram
+        img1 = np.zeros((100, 100), dtype=np.uint8)
+        img2 = np.random.randint(0, 256, (100, 100), dtype=np.uint8)
+        h1 = compute_lbp_histogram(img1)
+        h2 = compute_lbp_histogram(img2)
+        assert not np.allclose(h1, h2)
 
 
 class TestGammaCorrection:
@@ -47,7 +91,6 @@ class TestGammaCorrection:
         from facerec_classical.preprocessor import gamma_correction
         result = gamma_correction(sample_gray_image, gamma=1.0)
         assert result.shape == sample_gray_image.shape
-        # gamma=1.0 should be very close to identity
         np.testing.assert_allclose(result.astype(float), sample_gray_image.astype(float), atol=1)
 
     def test_gamma_lt1_darkens(self):
@@ -76,19 +119,20 @@ class TestResizeFace:
         img = np.zeros((50, 80), dtype=np.uint8)
         for size in [(64, 64), (100, 100), (32, 32)]:
             resized = resize_face(img, target_size=size)
-            assert resized.shape == (size[1], size[0])  # cv2.resize returns (w, h)
+            assert resized.shape == (size[1], size[0])
 
 
 class TestPreprocessFace:
-    """Tests for the convenience preprocess_face() pipeline."""
+    """Tests for the fused preprocess_face() pipeline (HOG + LBP)."""
 
     def test_full_pipeline_output_shape(self, sample_bgr_image):
         from facerec_classical.preprocessor import preprocess_face
         result = preprocess_face(sample_bgr_image, target_size=(100, 100))
-        assert result.shape == (3872,)
+        # HOG: 3872 + LBP: 250 = 4122
+        assert result.shape == (4122,)
         assert result.dtype in (np.float32, np.float64)
 
     def test_full_pipeline_with_gamma(self, sample_bgr_image):
         from facerec_classical.preprocessor import preprocess_face
         result = preprocess_face(sample_bgr_image, target_size=(100, 100), gamma=1.5)
-        assert result.shape == (3872,)
+        assert result.shape == (4122,)
