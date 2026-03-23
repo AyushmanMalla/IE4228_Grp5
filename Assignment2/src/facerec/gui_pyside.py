@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QVBoxLayout,
     QWidget,
+    QPushButton,    
+    QInputDialog,   
 )
 
 from facerec.alignment import align_face
@@ -36,6 +38,7 @@ from facerec.config import Config
 from facerec.database import GalleryDatabase
 from facerec.detector import FaceDetector
 from facerec.recognizer import FaceRecognizer
+from facerec.pipeline import FaceRecognitionPipeline
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +73,7 @@ class TrackedFace:
     """Represents a face tracked across frames."""
     def __init__(self, bbox: np.ndarray):
         self.bbox: np.ndarray = bbox  # [x1, y1, x2, y2]
+        self.smooth_bbox: np.ndarray = bbox.copy()
         self.name: str = "Unknown"
         self.score: float = 0.0
         self.tracker: cv2.Tracker | None = None
@@ -146,10 +150,16 @@ class MLWorkerThread(QThread):
         self.device = device
         self.similarity_threshold = similarity_threshold
         self._is_running = True
+        self._pending_reg_name: str | None = None
         
         # 1-deep buffer ensures we only process the absolute newest frame
         self._latest_frame: np.ndarray | None = None
         self._frame_cond = QObject() # Simple synchronization
+
+    @Slot(str)
+    def request_registration(self, name: str) -> None:
+        """Triggered by UI to register the largest face in the next frame."""
+        self._pending_reg_name = name
 
     @Slot(np.ndarray)
     def update_frame(self, frame: np.ndarray) -> None:
@@ -164,6 +174,11 @@ class MLWorkerThread(QThread):
         gallery = GalleryDatabase(self.gallery_dir)
         if (self.gallery_dir / "gallery.json").exists():
             gallery.load()
+
+        config = Config()
+        config.device = self.device
+        pipeline = FaceRecognitionPipeline(config=config, gallery=gallery)
+
         self.gallery_loaded.emit(gallery.list_identities())
 
         tracked_faces: list[TrackedFace] = []
@@ -189,7 +204,12 @@ class MLWorkerThread(QThread):
                     ok, bbox = face.tracker.update(frame_bgr)
                     if ok:
                         x, y, w, h = bbox
-                        face.bbox = np.array([x, y, x+w, y+h])
+                        target_box = np.array([x, y, x+w, y+h])
+                        face.bbox = target_box
+                        
+                        # Apply EMA smoothing (70% old, 30% new)
+                        face.smooth_bbox = (0.7 * face.smooth_bbox) + (0.3 * target_box)
+                        
                         if w > 20 and h > 20 and x >= -w and y >= -h:
                             alive_faces.append(face)
             
@@ -198,6 +218,15 @@ class MLWorkerThread(QThread):
             if frame_idx % self.DETECT_EVERY_N_FRAMES == 0 or not tracked_faces:
                 small_frame = cv2.resize(frame_bgr, (0, 0), fx=self.DETECT_SCALE, fy=self.DETECT_SCALE)
                 dets = detector.detect(small_frame)
+
+                if self._pending_reg_name and dets:
+                    pipeline.register_new_identity(
+                        frame_bgr, dets[0], self._pending_reg_name, scale=self.DETECT_SCALE
+                    )
+                    self.gallery_loaded.emit(gallery.list_identities())
+                    self._pending_reg_name = None
+                    tracked_faces.clear()
+                    continue
                 
                 new_tracked_faces = []
                 for det in dets:
@@ -217,6 +246,7 @@ class MLWorkerThread(QThread):
                             
                     if matched_face is not None:
                         matched_face.bbox = box
+                        matched_face.smooth_bbox = (0.7 * matched_face.smooth_bbox) + (0.3 * box)
                         matched_face.frames_since_detect = 0
                         self._init_tracker(matched_face, frame_bgr)
                         new_tracked_faces.append(matched_face)
@@ -242,7 +272,7 @@ class MLWorkerThread(QThread):
                     face.aligned_crop = None
                     
                 results.append({
-                    "bbox": face.bbox,
+                    "bbox": face.smooth_bbox,
                     "name": face.name,
                     "score": face.score
                 })
@@ -564,7 +594,15 @@ class MainWindow(QMainWindow):
         self.gallery_container = QVBoxLayout()
         self.gallery_container.setSpacing(6)
         l_gal.addLayout(self.gallery_container)
-        
+
+        self.btn_register = QPushButton("Register Unknown Face")
+        self.btn_register.setStyleSheet(f"""
+            QPushButton {{ background-color: {Theme.ACCENT_BLUE}; color: {Theme.BG_PRIMARY}; 
+            border-radius: 6px; padding: 10px; font-weight: bold; }}
+        """)
+        self.btn_register.clicked.connect(self._on_register_click)
+        l_gal.addWidget(self.btn_register)
+
         sidebar.addWidget(p_gal)
         
         # Tracker Stats
@@ -616,6 +654,12 @@ class MainWindow(QMainWindow):
             lbl = QLabel(f"● {name.replace('_', ' ')}")
             lbl.setStyleSheet(f"color: {Theme.TEXT_PRIMARY};")
             self.gallery_container.addWidget(lbl)
+
+    @Slot()
+    def _on_register_click(self) -> None:
+        name, ok = QInputDialog.getText(self, "Register Face", "Enter name (e.g., John_Doe):")
+        if ok and name.strip():
+            self.ml_thread.request_registration(name.strip().replace(" ", "_"))
 
     def closeEvent(self, event) -> None:
         """Safely clean up threads on exit."""
