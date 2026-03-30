@@ -6,6 +6,8 @@ Orchestrates detection → alignment → embedding → gallery query.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -14,6 +16,9 @@ from facerec.config import Config
 from facerec.database import GalleryDatabase
 from facerec.detector import FaceDetector
 from facerec.recognizer import FaceRecognizer
+
+import time
+import cv2
 
 
 @dataclass
@@ -103,3 +108,27 @@ class FaceRecognitionPipeline:
             )
 
         return results
+
+    def register_new_identity(
+        self,
+        frame_bgr: np.ndarray,
+        detection: Any,
+        name: str,
+        scale: float = 1.0
+    ) -> None:
+        """Handles the full backend logic of registering a new face live."""
+        # 1. Save the actual photo to the team_photos folder
+        project_root = Path(__file__).resolve().parents[2]
+        photos_dir = project_root / "data" / "team_photos" / name
+        photos_dir.mkdir(parents=True, exist_ok=True)
+        filename = photos_dir / f"live_{int(time.time())}.jpg"
+        cv2.imwrite(str(filename), frame_bgr)
+
+        # 2. Extract the math embedding using the pipeline's own recognizer
+        lms = detection.landmarks / scale
+        crop = align_face(frame_bgr, lms, output_size=self._config.aligned_face_size)
+        emb = self._recognizer.get_embedding(crop)
+        
+        # 3. Save to the pipeline's database
+        self._gallery.add_identity(name, [emb])
+        self._gallery.save()
