@@ -33,4 +33,4 @@ else
 fi
 
 echo "[4/4] Starting live Graphical Interface..."
-python -m facerec.gui --gallery-dir data/gallery
+python -m facerec.gui_pyside --gallery-dir data/gallery
