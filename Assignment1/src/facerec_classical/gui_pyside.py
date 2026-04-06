@@ -1,7 +1,8 @@
 """Live face recognition demo GUI using PySide6 (Classical Pipeline).
 
 A real-time webcam feed with entirely decoupled Camera IO and ML inference threads.
-Features zero-copy numpy-to-QImage rendering, KCF tracking, and Haar/PCA/LDA inference.
+Features zero-copy numpy-to-QImage rendering, KCF tracking, Haar/PCA/LDA inference,
+and a Pipeline Visualizer tab showing all intermediate preprocessing stages.
 """
 
 from __future__ import annotations
@@ -130,6 +131,7 @@ class ClassicalMLWorkerThread(QThread):
     """Dedicated thread for Haar detection and PCA/LDA recognition."""
     detections_ready = Signal(list)
     gallery_loaded = Signal(list)
+    pipeline_stages_ready = Signal(dict)  # intermediate preprocessing visualizations
 
     DETECT_EVERY_N_FRAMES = 5
     DETECT_SCALE = 0.5
@@ -240,7 +242,8 @@ class ClassicalMLWorkerThread(QThread):
                 tracked_faces = new_tracked_faces
                 
             results = []
-            for face in tracked_faces:
+            stage_images = {}  # collect visualisation stages from the first face
+            for idx, face in enumerate(tracked_faces):
                 if face.needs_recognition:
                     # Crop and recognize sequentially to avoid GIL contention
                     x1, y1, x2, y2 = [int(v) for v in face.bbox]
@@ -254,6 +257,12 @@ class ClassicalMLWorkerThread(QThread):
                         
                         face.name = name
                         face.score = dist
+
+                        # Capture pipeline stages for the FIRST detected face
+                        if idx == 0:
+                            stage_images = self._capture_pipeline_stages(
+                                face_crop, face_aligned, config.target_size
+                            )
                     
                     face.needs_recognition = False
                     
@@ -264,6 +273,49 @@ class ClassicalMLWorkerThread(QThread):
                 })
 
             self.detections_ready.emit(results)
+            if stage_images:
+                self.pipeline_stages_ready.emit(stage_images)
+
+    def _capture_pipeline_stages(
+        self, raw_crop: np.ndarray, aligned: np.ndarray, target_size: tuple[int, int]
+    ) -> dict[str, np.ndarray]:
+        """Extract intermediate images for the pipeline visualiser."""
+        from facerec_classical.preprocessor import clahe, resize_face
+        from skimage.feature import hog, local_binary_pattern
+
+        stages: dict[str, np.ndarray] = {}
+
+        # Stage 1: Raw detector crop
+        stages["1_raw_crop"] = raw_crop.copy()
+
+        # Stage 2: Landmark-aligned
+        stages["2_aligned"] = aligned.copy()
+
+        # Stage 3: CLAHE
+        clahe_img = clahe(aligned)
+        resized = resize_face(clahe_img, target_size)
+        stages["3_clahe"] = resized.copy()
+
+        # Stage 4: HOG gradient visualisation
+        _, hog_image = hog(
+            resized,
+            orientations=8,
+            pixels_per_cell=(8, 8),
+            cells_per_block=(2, 2),
+            block_norm="L2-Hys",
+            visualize=True,
+            feature_vector=True,
+        )
+        # Normalise HOG map to 0-255 uint8 for display
+        hog_norm = (hog_image / (hog_image.max() + 1e-8) * 255).astype(np.uint8)
+        stages["4_hog"] = hog_norm
+
+        # Stage 5: LBP texture map
+        lbp_map = local_binary_pattern(resized, 8, 1, method="uniform")
+        lbp_norm = (lbp_map / (lbp_map.max() + 1e-8) * 255).astype(np.uint8)
+        stages["5_lbp"] = lbp_norm
+
+        return stages
 
     def _init_tracker(self, face: TrackedFace, frame_bgr: np.ndarray) -> None:
         try:
@@ -296,6 +348,133 @@ class ClassicalMLWorkerThread(QThread):
     def stop(self) -> None:
         self._is_running = False
         self.wait()
+
+
+# ---------------------------------------------------------------------------
+# Pipeline Visualizer Widget
+# ---------------------------------------------------------------------------
+class PipelineVisualizerWidget(QWidget):
+    """Displays all intermediate preprocessing stages side-by-side."""
+
+    STAGE_LABELS = {
+        "1_raw_crop": "① Raw Crop",
+        "2_aligned": "② Aligned",
+        "3_clahe": "③ CLAHE",
+        "4_hog": "④ HOG Gradients",
+        "5_lbp": "⑤ LBP Texture",
+    }
+    STAGE_DESCRIPTIONS = {
+        "1_raw_crop": "Detector bounding box slice",
+        "2_aligned": "68-pt landmark similarity transform",
+        "3_clahe": "Adaptive histogram equalisation",
+        "4_hog": "Gradient orientation map (edges)",
+        "5_lbp": "Local Binary Pattern (micro-texture)",
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.stage_labels: dict[str, QLabel] = {}
+        self.stage_images: dict[str, QLabel] = {}
+        self.stage_descs: dict[str, QLabel] = {}
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 20, 20, 20)
+
+        # Title
+        title = QLabel("PIPELINE VISUALISER")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            f"color: {Theme.ACCENT_ORANGE}; font-family: {Theme.FONT_HEADING};"
+            f" font-size: 18px; font-weight: bold; padding: 8px;"
+        )
+        outer.addWidget(title)
+
+        subtitle = QLabel("Real-time view of each classical preprocessing stage for the primary detected face")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet(
+            f"color: {Theme.TEXT_DIM}; font-family: {Theme.FONT_BODY}; font-size: 12px; padding-bottom: 12px;"
+        )
+        outer.addWidget(subtitle)
+
+        # Horizontal row of stage cards
+        row = QHBoxLayout()
+        row.setSpacing(12)
+
+        for key in self.STAGE_LABELS:
+            card = QFrame()
+            card.setStyleSheet(
+                f"QFrame {{ background-color: {Theme.BG_SECONDARY}; border-radius: 10px; }}"
+            )
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(10, 10, 10, 10)
+            card_layout.setSpacing(6)
+
+            # Stage name
+            lbl = QLabel(self.STAGE_LABELS[key])
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(
+                f"color: {Theme.ACCENT_BLUE}; font-family: {Theme.FONT_HEADING};"
+                f" font-size: 13px; font-weight: bold;"
+            )
+            card_layout.addWidget(lbl)
+            self.stage_labels[key] = lbl
+
+            # Image placeholder
+            img_lbl = QLabel()
+            img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            img_lbl.setMinimumSize(160, 160)
+            img_lbl.setStyleSheet(
+                f"background-color: {Theme.BG_PRIMARY}; border-radius: 6px;"
+            )
+            card_layout.addWidget(img_lbl)
+            self.stage_images[key] = img_lbl
+
+            # Description
+            desc = QLabel(self.STAGE_DESCRIPTIONS[key])
+            desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            desc.setWordWrap(True)
+            desc.setStyleSheet(
+                f"color: {Theme.TEXT_DIM}; font-family: {Theme.FONT_BODY}; font-size: 10px;"
+            )
+            card_layout.addWidget(desc)
+            self.stage_descs[key] = desc
+
+            row.addWidget(card)
+
+        outer.addLayout(row)
+        outer.addStretch()
+
+        # Waiting label shown when no face detected
+        self._waiting_label = QLabel("Waiting for face detection…")
+        self._waiting_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._waiting_label.setStyleSheet(
+            f"color: {Theme.TEXT_DIM}; font-family: {Theme.FONT_BODY}; font-size: 14px;"
+        )
+        outer.addWidget(self._waiting_label)
+
+    @Slot(dict)
+    def update_stages(self, stages: dict[str, np.ndarray]) -> None:
+        """Receive intermediate images and render them."""
+        self._waiting_label.hide()
+        for key, img in stages.items():
+            if key not in self.stage_images:
+                continue
+
+            # Ensure uint8 grayscale
+            if img.dtype != np.uint8:
+                img = img.astype(np.uint8)
+
+            # Resize for display (uniform 160x160)
+            display = cv2.resize(img, (160, 160), interpolation=cv2.INTER_NEAREST)
+
+            h, w = display.shape[:2]
+            if display.ndim == 2:
+                qimg = QImage(display.data, w, h, w, QImage.Format.Format_Grayscale8)
+            else:
+                qimg = QImage(display.data, w, h, w * 3, QImage.Format.Format_RGB888)
+
+            self.stage_images[key].setPixmap(QPixmap.fromImage(qimg))
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +598,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("IE4228 · PySide6 Classical Face Recognition")
         self.setStyleSheet(f"background-color: {Theme.BG_PRIMARY}; color: {Theme.TEXT_PRIMARY};")
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(1100, 750)
         
         self.frame_times = []
         self.last_frame_time = time.perf_counter()
@@ -430,13 +609,47 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(16)
         
+        # --- Tab widget: Live Feed + Pipeline Visualizer ---
+        from PySide6.QtWidgets import QTabWidget
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: 1px solid {Theme.BORDER};
+                border-radius: 8px;
+                background-color: {Theme.BG_PRIMARY};
+            }}
+            QTabBar::tab {{
+                background-color: {Theme.BG_SECONDARY};
+                color: {Theme.TEXT_SECONDARY};
+                font-family: {Theme.FONT_HEADING};
+                font-weight: bold;
+                padding: 10px 24px;
+                margin-right: 4px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {Theme.ACCENT_ORANGE};
+                color: {Theme.TEXT_PRIMARY};
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: #3a3a39;
+            }}
+        """)
+
+        # Tab 1: Live video feed
         self.video_widget = VideoOverlayWidget()
         self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.video_widget.setStyleSheet(f"background-color: {Theme.BG_SECONDARY}; border-radius: 8px;")
+        self.tab_widget.addTab(self.video_widget, "⬤  Live Feed")
+
+        # Tab 2: Pipeline Visualizer
+        self.pipeline_viz = PipelineVisualizerWidget()
+        self.tab_widget.addTab(self.pipeline_viz, "⚙  Pipeline Visualiser")
         
         sidebar = self._build_sidebar()
         
-        main_layout.addWidget(self.video_widget, stretch=3)
+        main_layout.addWidget(self.tab_widget, stretch=3)
         main_layout.addLayout(sidebar, stretch=1)
         
         self.status_hw.setText("Hardware: CPU (Classical)")
@@ -451,6 +664,7 @@ class MainWindow(QMainWindow):
         self.ml_thread.detections_ready.connect(self.video_widget.set_detections)
         self.ml_thread.detections_ready.connect(self._update_stats)
         self.ml_thread.gallery_loaded.connect(self._update_gallery_list)
+        self.ml_thread.pipeline_stages_ready.connect(self.pipeline_viz.update_stages)
         
         # Sliders mapped to two-stage triage thresholds
         self.slider.valueChanged.connect(lambda v: self.ml_thread.update_threshold(float(v) / 100.0))
