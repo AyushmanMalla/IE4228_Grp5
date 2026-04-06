@@ -99,6 +99,9 @@ class ClassicalFaceRecPipeline:
     def recognize(self, image: np.ndarray) -> list[RecognitionResult]:
         """Run detection + recognition on a single BGR image.
 
+        Pipeline per face: detect → crop → align → preprocess (CLAHE →
+        resize 200×200 → HOG+LBP) → PCA/LDA predict.
+
         Parameters
         ----------
         image : np.ndarray
@@ -110,29 +113,30 @@ class ClassicalFaceRecPipeline:
             One result per detected face.
         """
         import cv2
+        from facerec_classical.detector import Detection
 
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         detections = self._detector.detect(gray)
 
         if not detections:
-            # Fallback: treat whole image as a face
+            # Fallback: treat the whole image as a single face
             h, w = gray.shape
-            detections = [
-                type(detections[0])(bbox=(0, 0, w, h), area=w * h)
-                if detections
-                else type("D", (), {"bbox": (0, 0, w, h), "area": w * h})()
-            ]
-            # Actually we need a proper Detection
-            from facerec_classical.detector import Detection
-            detections = [Detection(bbox=(0, 0, w, h), area=w * h, confidence=1.0)]
+            detections = [Detection(bbox=(0, 0, w, h), area=w * h, confidence=0.0)]
 
         results: list[RecognitionResult] = []
 
         for det in detections:
             x, y_coord, w, h = det.bbox
             face_crop = gray[y_coord : y_coord + h, x : x + w]
-            face_preprocessed = preprocess_face(
+
+            # Align the cropped face (matches training pipeline)
+            face_aligned = self._aligner.align(
                 face_crop, target_size=self._config.target_size
+            )
+
+            # Preprocess: CLAHE → resize to 200×200 → HOG + LBP features
+            face_preprocessed = preprocess_face(
+                face_aligned, target_size=self._config.target_size
             )
             face_vector = face_preprocessed.flatten()
 

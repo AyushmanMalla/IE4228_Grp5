@@ -105,7 +105,7 @@ def gamma_correction(gray: np.ndarray, gamma: float = 1.2) -> np.ndarray:
     return cv2.LUT(gray, table)
 
 
-def resize_face(face: np.ndarray, target_size: tuple[int, int] = (100, 100)) -> np.ndarray:
+def resize_face(face: np.ndarray, target_size: tuple[int, int] = (200, 200)) -> np.ndarray:
     """Resize a face crop to a fixed spatial size.
 
     Parameters
@@ -189,7 +189,7 @@ def compute_lbp_histogram(
 
 def preprocess_face(
     image: np.ndarray,
-    target_size: tuple[int, int] = (100, 100),
+    target_size: tuple[int, int] = (200, 200),
     gamma: float = 1.0,
 ) -> np.ndarray:
     """Full pre-processing pipeline: grayscale → CLAHE → gamma → resize → HOG + LBP.
@@ -216,7 +216,7 @@ def preprocess_face(
         eq = gamma_correction(eq, gamma)
     resized = resize_face(eq, target_size)
 
-    # HOG features — shape/edge gradients (3,872 dims for 100×100)
+    # HOG features — shape/edge gradients (18,432 dims for 200×200)
     hog_features = hog(
         resized,
         orientations=8,

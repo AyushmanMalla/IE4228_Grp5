@@ -165,9 +165,9 @@ class FaceAligner:
     Falls back to simple resize if landmarks can't be detected.
     """
 
-    # Target eye positions on a 100x100 crop
-    LEFT_EYE_TARGET = (30, 35)
-    RIGHT_EYE_TARGET = (70, 35)
+    # Target eye positions on a 200x200 crop
+    LEFT_EYE_TARGET = (60, 70)
+    RIGHT_EYE_TARGET = (140, 70)
 
     def __init__(self, predictor_path: str = "") -> None:
         from pathlib import Path
@@ -191,7 +191,7 @@ class FaceAligner:
     def align(
         self,
         face_crop: np.ndarray,
-        target_size: tuple[int, int] = (100, 100),
+        target_size: tuple[int, int] = (200, 200),
     ) -> np.ndarray:
         """Align a face crop using landmark-based similarity transform.
 

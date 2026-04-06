@@ -22,7 +22,7 @@ class Config:
     cascade_path: str = ""
 
     # --- Pre-processing ---
-    target_size: tuple[int, int] = (100, 100)
+    target_size: tuple[int, int] = (200, 200)
 
     # --- PCA ---
     n_components_pca: int = 50
