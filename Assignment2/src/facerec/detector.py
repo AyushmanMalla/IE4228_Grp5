@@ -1,6 +1,7 @@
 """Face detection module using insightface.
 
-Supports multiple backends: RetinaFace (accuracy) and SCRFD (speed).
+Supports multiple backends: SCRFD-10GF (accuracy, buffalo_l) and
+SCRFD-500MF (speed, buffalo_sc).
 """
 
 from __future__ import annotations
@@ -25,8 +26,8 @@ class FaceDetector:
     Parameters
     ----------
     model_name : str
-        insightface model pack name.  ``"buffalo_l"`` includes RetinaFace
-        (ResNet-50 backbone).  ``"buffalo_sc"`` uses SCRFD for speed.
+        insightface model pack name.  ``"buffalo_l"`` uses SCRFD-10GF
+        (10 GFLOPs).  ``"buffalo_sc"`` uses SCRFD-500MF for speed.
     device : str
         ``"cpu"`` for local prototyping, ``"cuda"`` for NSCC A100.
     det_thresh : float

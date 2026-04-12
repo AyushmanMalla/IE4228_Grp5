@@ -1,6 +1,6 @@
 """Face recognition / embedding extraction module.
 
-Uses insightface ArcFace (R100) by default.  Produces 512-d, L2-normalised
+Uses insightface ArcFace (R50) by default.  Produces 512-d, L2-normalised
 embeddings suitable for cosine-similarity matching.
 """
 
@@ -15,7 +15,7 @@ class FaceRecognizer:
     Parameters
     ----------
     model_name : str
-        insightface model pack name (e.g. ``"buffalo_l"`` for ArcFace-R100).
+        insightface model pack name (e.g. ``"buffalo_l"`` for ArcFace-R50).
     device : str
         ``"cpu"`` for local prototyping, ``"cuda"`` for NSCC A100.
     """

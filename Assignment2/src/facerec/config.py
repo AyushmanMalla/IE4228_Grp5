@@ -23,14 +23,14 @@ class Config:
     model_dir: Path = field(default=None)      # type: ignore[assignment]
 
     # --- Detection ---
-    detector_model: str = "buffalo_l"  # insightface model pack (includes RetinaFace)
+    detector_model: str = "buffalo_l"  # insightface model pack (SCRFD-10GF detector)
     detection_threshold: float = 0.5
 
     # --- Alignment ---
     aligned_face_size: int = 112  # standard for ArcFace / AdaFace
 
     # --- Recognition ---
-    recognition_model: str = "buffalo_l"  # ArcFace-R100 from buffalo_l pack
+    recognition_model: str = "buffalo_l"  # ArcFace-R50 from buffalo_l pack
     similarity_threshold: float = 0.35
 
     # --- Device ---
