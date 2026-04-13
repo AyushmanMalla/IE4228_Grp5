@@ -80,6 +80,10 @@ class TrackedFace:
         self.frames_since_detect: int = 0
         self.needs_embedding: bool = True
         self.aligned_crop: np.ndarray | None = None
+        
+        # Caches for visualization
+        self.last_aligned_crop: np.ndarray | None = None
+        self.last_embedding: np.ndarray | None = None
 
     @property
     def w(self) -> float: return self.bbox[2] - self.bbox[0]
@@ -140,6 +144,7 @@ class MLWorkerThread(QThread):
     """Dedicated thread for InsightFace detection and ArcFace recognition."""
     detections_ready = Signal(list)
     gallery_loaded = Signal(list)
+    pipeline_stages_ready = Signal(dict)
 
     DETECT_EVERY_N_FRAMES = 3
     DETECT_SCALE = 0.5
@@ -151,6 +156,7 @@ class MLWorkerThread(QThread):
         self.similarity_threshold = similarity_threshold
         self._is_running = True
         self._pending_reg_name: str | None = None
+        self._last_dets = []
         
         # 1-deep buffer ensures we only process the absolute newest frame
         self._latest_frame: np.ndarray | None = None
@@ -194,8 +200,9 @@ class MLWorkerThread(QThread):
             frame_idx += 1
             
             # Since frame is RGB from CameraThread, we must convert to BGR 
-            # for OpenCV trackers and InsightFace. We only downscale for detection.
+            # for OpenCV trackers and InsightFace.
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            small_frame = cv2.resize(frame_bgr, (0, 0), fx=self.DETECT_SCALE, fy=self.DETECT_SCALE)
 
             alive_faces = []
             for face in tracked_faces:
@@ -216,8 +223,8 @@ class MLWorkerThread(QThread):
             tracked_faces = alive_faces
 
             if frame_idx % self.DETECT_EVERY_N_FRAMES == 0 or not tracked_faces:
-                small_frame = cv2.resize(frame_bgr, (0, 0), fx=self.DETECT_SCALE, fy=self.DETECT_SCALE)
                 dets = detector.detect(small_frame)
+                self._last_dets = dets
 
                 if self._pending_reg_name and dets:
                     pipeline.register_new_identity(
@@ -264,7 +271,9 @@ class MLWorkerThread(QThread):
             results = []
             for face in tracked_faces:
                 if face.needs_embedding and face.aligned_crop is not None:
+                    face.last_aligned_crop = face.aligned_crop.copy()
                     emb = recognizer.get_embedding(face.aligned_crop)
+                    face.last_embedding = emb.copy()
                     name, score = gallery.query(emb, threshold=self.similarity_threshold)
                     face.name = name
                     face.score = score
@@ -277,7 +286,52 @@ class MLWorkerThread(QThread):
                     "score": face.score
                 })
 
+            stages = self._capture_pipeline_stages(frame_bgr, small_frame, tracked_faces)
+            self.pipeline_stages_ready.emit(stages)
+
             self.detections_ready.emit(results)
+
+    def _capture_pipeline_stages(self, frame_bgr: np.ndarray, small_frame: np.ndarray, tracked_faces: list[TrackedFace]) -> dict:
+        stages = {}
+        # 1. Raw
+        stages["1_raw_crop"] = frame_bgr
+        
+        # 2. Resized
+        stages["2_rescaled"] = small_frame
+        
+        # 3. Detection (Draw on a copy of small frame)
+        det_img = small_frame.copy()
+        for det in self._last_dets:
+            x1, y1, x2, y2 = det.bbox.astype(int)
+            cv2.rectangle(det_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            for lx, ly in det.landmarks.astype(int):
+                cv2.circle(det_img, (lx, ly), 2, (0, 0, 255), -1)
+        stages["3_detection"] = det_img
+        
+        # 4 & 5. Find the largest tracked face that has cached visualizer data
+        largest_face = None
+        max_area = 0
+        for f in tracked_faces:
+            if f.last_aligned_crop is not None and f.last_embedding is not None:
+                area = f.w * f.h
+                if area > max_area:
+                    max_area = area
+                    largest_face = f
+        
+        if largest_face:
+            stages["4_alignment"] = largest_face.last_aligned_crop
+            emb = largest_face.last_embedding
+            emb_norm = cv2.normalize(emb, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+            # Reshape 512 into 16x32 for barcode/heatmap look
+            emb_2d = emb_norm.reshape(16, 32)
+            emb_color = cv2.applyColorMap(emb_2d, cv2.COLORMAP_INFERNO)
+            stages["5_embedding"] = emb_color
+        else:
+            stages["4_alignment"] = np.zeros((112, 112, 3), dtype=np.uint8)
+            emb_placeholder = np.zeros((16, 32), dtype=np.uint8)
+            stages["5_embedding"] = cv2.applyColorMap(emb_placeholder, cv2.COLORMAP_INFERNO)
+
+        return stages
 
     def _init_tracker(self, face: TrackedFace, frame_bgr: np.ndarray) -> None:
         try:
@@ -301,6 +355,135 @@ class MLWorkerThread(QThread):
     def stop(self) -> None:
         self._is_running = False
         self.wait()
+
+
+# ---------------------------------------------------------------------------
+# Pipeline Visualizer Widget
+# ---------------------------------------------------------------------------
+class PipelineVisualizerWidget(QWidget):
+    """Displays all intermediate preprocessing stages side-by-side."""
+
+    STAGE_LABELS = {
+        "1_raw_crop": "① Raw Feed",
+        "2_rescaled": "② Rescaled Feed",
+        "3_detection": "③ Detection Model",
+        "4_alignment": "④ Alignment Layer",
+        "5_embedding": "⑤ ArcFace Embedding",
+    }
+    STAGE_DESCRIPTIONS = {
+        "1_raw_crop": "Full camera feed",
+        "2_rescaled": "Downscaled for detector",
+        "3_detection": "BBox & 5-point landmarks",
+        "4_alignment": "112x112 similarity transform map",
+        "5_embedding": "512-dim feature magnitude heatmap",
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.stage_labels: dict[str, QLabel] = {}
+        self.stage_images: dict[str, QLabel] = {}
+        self.stage_descs: dict[str, QLabel] = {}
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 20, 20, 20)
+
+        # Title
+        title = QLabel("DL PIPELINE VISUALISER")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            f"color: {Theme.ACCENT_ORANGE}; font-family: {Theme.FONT_HEADING};"
+            f" font-size: 18px; font-weight: bold; padding: 8px;"
+        )
+        outer.addWidget(title)
+
+        subtitle = QLabel("Real-time view of each deep learning pipeline stage")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet(
+            f"color: {Theme.TEXT_DIM}; font-family: {Theme.FONT_BODY}; font-size: 12px; padding-bottom: 12px;"
+        )
+        outer.addWidget(subtitle)
+
+        from PySide6.QtWidgets import QGridLayout
+        grid = QGridLayout()
+        grid.setSpacing(16)
+
+        col = 0
+        row_idx = 0
+        for key in self.STAGE_LABELS:
+            card = QFrame()
+            card.setStyleSheet(
+                f"QFrame {{ background-color: {Theme.BG_SECONDARY}; border-radius: 10px; }}"
+            )
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 12, 12, 12)
+            card_layout.setSpacing(8)
+
+            lbl = QLabel(self.STAGE_LABELS[key])
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(
+                f"color: {Theme.ACCENT_BLUE}; font-family: {Theme.FONT_HEADING};"
+                f" font-size: 15px; font-weight: bold;"
+            )
+            card_layout.addWidget(lbl)
+            self.stage_labels[key] = lbl
+
+            img_lbl = QLabel()
+            img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            img_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            img_lbl.setMinimumSize(240, 240)
+            img_lbl.setStyleSheet(
+                f"background-color: {Theme.BG_PRIMARY}; border-radius: 8px;"
+            )
+            card_layout.addWidget(img_lbl)
+            self.stage_images[key] = img_lbl
+
+            desc = QLabel(self.STAGE_DESCRIPTIONS[key])
+            desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            desc.setWordWrap(True)
+            desc.setStyleSheet(
+                f"color: {Theme.TEXT_DIM}; font-family: {Theme.FONT_BODY}; font-size: 12px;"
+            )
+            card_layout.addWidget(desc)
+            self.stage_descs[key] = desc
+
+            grid.addWidget(card, row_idx, col)
+            
+            col += 1
+            if col > 2:
+                col = 0
+                row_idx += 1
+
+        outer.addLayout(grid)
+        outer.addStretch()
+
+        self._waiting_label = QLabel("Initializing pipeline visualizer…")
+        self._waiting_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._waiting_label.setStyleSheet(
+            f"color: {Theme.TEXT_DIM}; font-family: {Theme.FONT_BODY}; font-size: 14px;"
+        )
+        outer.addWidget(self._waiting_label)
+
+    @Slot(dict)
+    def update_stages(self, stages: dict[str, np.ndarray]) -> None:
+        self._waiting_label.hide()
+        for key, img in stages.items():
+            if key not in self.stage_images:
+                continue
+
+            # Ensure uint8 image
+            if img.dtype != np.uint8:
+                img = img.astype(np.uint8)
+
+            display = cv2.resize(img, (240, 240), interpolation=cv2.INTER_NEAREST)
+
+            h, w = display.shape[:2]
+            if display.ndim == 2:
+                qimg = QImage(display.data, w, h, w, QImage.Format.Format_Grayscale8)
+            else:
+                qimg = QImage(display.data, w, h, w * 3, QImage.Format.Format_BGR888)
+
+            self.stage_images[key].setPixmap(QPixmap.fromImage(qimg))
 
 
 # ---------------------------------------------------------------------------
@@ -459,15 +642,48 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(16)
         
-        # Left: Video Panel
+        # --- Tab widget: Live Feed + Pipeline Visualizer ---
+        from PySide6.QtWidgets import QTabWidget
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: 1px solid {Theme.BORDER};
+                border-radius: 8px;
+                background-color: {Theme.BG_PRIMARY};
+            }}
+            QTabBar::tab {{
+                background-color: {Theme.BG_SECONDARY};
+                color: {Theme.TEXT_SECONDARY};
+                font-family: {Theme.FONT_HEADING};
+                font-weight: bold;
+                padding: 10px 24px;
+                margin-right: 4px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {Theme.ACCENT_ORANGE};
+                color: {Theme.TEXT_PRIMARY};
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: #3a3a39;
+            }}
+        """)
+
+        # Left: Video Panel / Live Feed
         self.video_widget = VideoOverlayWidget()
         self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.video_widget.setStyleSheet(f"background-color: {Theme.BG_SECONDARY}; border-radius: 8px;")
+        self.tab_widget.addTab(self.video_widget, "⬤  Live Feed")
+        
+        # Tab 2: Pipeline Visualizer
+        self.pipeline_viz = PipelineVisualizerWidget()
+        self.tab_widget.addTab(self.pipeline_viz, "⚙  Pipeline Visualiser")
         
         # Right: Sidebar (Fixed width)
         sidebar = self._build_sidebar()
         
-        main_layout.addWidget(self.video_widget, stretch=3)
+        main_layout.addWidget(self.tab_widget, stretch=3)
         main_layout.addLayout(sidebar, stretch=1)
         
         # Thread Setup
@@ -492,6 +708,7 @@ class MainWindow(QMainWindow):
         self.ml_thread.detections_ready.connect(self.video_widget.set_detections)
         self.ml_thread.detections_ready.connect(self._update_stats)
         self.ml_thread.gallery_loaded.connect(self._update_gallery_list)
+        self.ml_thread.pipeline_stages_ready.connect(self.pipeline_viz.update_stages)
         
         self.slider.valueChanged.connect(lambda v: self.ml_thread.update_threshold(v / 100.0))
         
