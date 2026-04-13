@@ -101,7 +101,7 @@ class CameraThread(QThread):
     frame_ready = Signal(np.ndarray)
     error_signal = Signal(str)
 
-    def __init__(self, camera_index: int = 0, target_fps: int = 60, target_width: int = 1280, target_height: int = 720):
+    def __init__(self, camera_index: int = 0, target_fps: int = 60, target_width: int = 1920, target_height: int = 1080):
         super().__init__()
         self.camera_index = camera_index
         self.target_fps = target_fps
@@ -110,12 +110,21 @@ class CameraThread(QThread):
         self._is_running = True
 
     def run(self) -> None:
-        cap = cv2.VideoCapture(self.camera_index)
-        
-        # Request maximum hardware performance constraints to avoid software clipping
+        # Try AVFoundation backend first for max hardware performance on macOS
+        cap = cv2.VideoCapture(self.camera_index, cv2.CAP_AVFOUNDATION)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.target_width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.target_height)
         cap.set(cv2.CAP_PROP_FPS, self.target_fps)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Prevent frame buffering latency
+
+        # If AVFoundation fails or resolution is weirdly low, fallback to default backend and Mac limits
+        if not cap.isOpened() or cap.get(cv2.CAP_PROP_FRAME_WIDTH) < self.target_width:
+            cap.release()
+            cap = cv2.VideoCapture(self.camera_index)
+            # Fallback to MacBook default conservative settings
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            cap.set(cv2.CAP_PROP_FPS, 30)
 
         if not cap.isOpened():
             self.error_signal.emit("Failed to open camera.")
@@ -146,7 +155,7 @@ class MLWorkerThread(QThread):
     gallery_loaded = Signal(list)
     pipeline_stages_ready = Signal(dict)
 
-    DETECT_EVERY_N_FRAMES = 3
+    DETECT_EVERY_N_FRAMES = 6  # Scaled up for higher FPS target
     DETECT_SCALE = 0.5
 
     def __init__(self, gallery_dir: Path, device: str, similarity_threshold: float = 0.35):
